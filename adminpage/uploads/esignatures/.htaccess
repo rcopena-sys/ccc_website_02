@@ -1,0 +1,20 @@
+# Prevent direct access to signature files
+<FilesMatch "\.(png|jpg|jpeg|gif)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Only allow access from localhost/admin pages
+SetEnvIf Referer "^http://localhost/.*adminpage/" local_referer
+Order allow,deny
+Allow from env=local_referer
+Allow from localhost
+
+# Disable directory listing
+Options -Indexes
+
+# Prevent execution of scripts
+<FilesMatch "\.(php|phtml|php3|php4|php5|pl|py|cgi|sh|exe)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>

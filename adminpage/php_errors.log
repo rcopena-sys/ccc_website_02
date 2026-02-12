@@ -1,0 +1,153 @@
+[27-Oct-2025 04:35:35 Europe/Berlin] SQL Query: SELECT CONCAT(firstname, ' ', lastname) AS full_name, `student_id` AS `student_id`, `firstname` AS `firstname`, `lastname` AS `lastname`, `course` AS `course`, `classification` AS `classification` FROM signin_db WHERE student_id = ?
+[27-Oct-2025 04:35:35 Europe/Berlin] Student ID: 2022-10873
+[27-Oct-2025 04:35:35 Europe/Berlin] Fetched student data: Array
+(
+    [full_name] => rozz KREWPEK
+    [student_id] => 2022-10873
+    [firstname] => rozz
+    [lastname] => KREWPEK
+    [course] => BSIT
+    [classification] => Regular
+)
+
+[27-Oct-2025 04:35:35 Europe/Berlin] Final student data: Array
+(
+    [full_name] => rozz KREWPEK
+    [student_id] => 2022-10873
+    [firstname] => rozz
+    [lastname] => KREWPEK
+    [course] => BSIT
+    [classification] => Regular
+)
+
+[27-Oct-2025 04:35:35 Europe/Berlin] Available tables:
+[27-Oct-2025 04:35:35 Europe/Berlin] - activity_log_db
+[27-Oct-2025 04:35:35 Europe/Berlin] - assign_curriculum
+[27-Oct-2025 04:35:35 Europe/Berlin] - calendar
+[27-Oct-2025 04:35:35 Europe/Berlin] - curriculum
+[27-Oct-2025 04:35:35 Europe/Berlin] - feedback_db
+[27-Oct-2025 04:35:35 Europe/Berlin] - grades_db
+[27-Oct-2025 04:35:35 Europe/Berlin] - irregular_db
+[27-Oct-2025 04:35:35 Europe/Berlin] - list_db
+[27-Oct-2025 04:35:35 Europe/Berlin] - password_resets
+[27-Oct-2025 04:35:35 Europe/Berlin] - roles
+[27-Oct-2025 04:35:35 Europe/Berlin] - signin_db
+[27-Oct-2025 04:35:35 Europe/Berlin] - students_db
+[27-Oct-2025 04:35:35 Europe/Berlin] - users
+[27-Oct-2025 04:35:35 Europe/Berlin] Columns in signin_db:
+[27-Oct-2025 04:35:35 Europe/Berlin] - id (int(11))
+[27-Oct-2025 04:35:35 Europe/Berlin] - firstname (varchar(100))
+[27-Oct-2025 04:35:35 Europe/Berlin] - lastname (varchar(100))
+[27-Oct-2025 04:35:35 Europe/Berlin] - email (varchar(255))
+[27-Oct-2025 04:35:35 Europe/Berlin] - password (varchar(255))
+[27-Oct-2025 04:35:35 Europe/Berlin] - student_id (varchar(50))
+[27-Oct-2025 04:35:35 Europe/Berlin] - academic_year (varchar(20))
+[27-Oct-2025 04:35:35 Europe/Berlin] - course (varchar(50))
+[27-Oct-2025 04:35:35 Europe/Berlin] - role_id (int(11))
+[27-Oct-2025 04:35:35 Europe/Berlin] - created_at (datetime)
+[27-Oct-2025 04:35:35 Europe/Berlin] - updated_at (datetime)
+[27-Oct-2025 04:35:35 Europe/Berlin] - profile_image (varchar(255))
+[27-Oct-2025 04:35:35 Europe/Berlin] - status (enum('Active','Inactive'))
+[27-Oct-2025 04:35:35 Europe/Berlin] - classification (enum('Regular','Irregular'))
+[27-Oct-2025 04:35:36 Europe/Berlin] SQL Query: SELECT CONCAT(firstname, ' ', lastname) AS full_name, `student_id` AS `student_id`, `firstname` AS `firstname`, `lastname` AS `lastname`, `course` AS `course`, `classification` AS `classification` FROM signin_db WHERE student_id = ?
+[27-Oct-2025 04:35:36 Europe/Berlin] Student ID: 2022-10873
+[27-Oct-2025 04:35:36 Europe/Berlin] Fetched student data: Array
+(
+    [full_name] => rozz KREWPEK
+    [student_id] => 2022-10873
+    [firstname] => rozz
+    [lastname] => KREWPEK
+    [course] => BSIT
+    [classification] => Regular
+)
+
+[27-Oct-2025 04:35:36 Europe/Berlin] Final student data: Array
+(
+    [full_name] => rozz KREWPEK
+    [student_id] => 2022-10873
+    [firstname] => rozz
+    [lastname] => KREWPEK
+    [course] => BSIT
+    [classification] => Regular
+)
+
+[27-Oct-2025 04:35:36 Europe/Berlin] Available tables:
+[27-Oct-2025 04:35:36 Europe/Berlin] - activity_log_db
+[27-Oct-2025 04:35:36 Europe/Berlin] - assign_curriculum
+[27-Oct-2025 04:35:36 Europe/Berlin] - calendar
+[27-Oct-2025 04:35:36 Europe/Berlin] - curriculum
+[27-Oct-2025 04:35:36 Europe/Berlin] - feedback_db
+[27-Oct-2025 04:35:36 Europe/Berlin] - grades_db
+[27-Oct-2025 04:35:36 Europe/Berlin] - irregular_db
+[27-Oct-2025 04:35:36 Europe/Berlin] - list_db
+[27-Oct-2025 04:35:36 Europe/Berlin] - password_resets
+[27-Oct-2025 04:35:36 Europe/Berlin] - roles
+[27-Oct-2025 04:35:36 Europe/Berlin] - signin_db
+[27-Oct-2025 04:35:36 Europe/Berlin] - students_db
+[27-Oct-2025 04:35:36 Europe/Berlin] - users
+[27-Oct-2025 04:35:36 Europe/Berlin] Columns in signin_db:
+[27-Oct-2025 04:35:36 Europe/Berlin] - id (int(11))
+[27-Oct-2025 04:35:36 Europe/Berlin] - firstname (varchar(100))
+[27-Oct-2025 04:35:36 Europe/Berlin] - lastname (varchar(100))
+[27-Oct-2025 04:35:36 Europe/Berlin] - email (varchar(255))
+[27-Oct-2025 04:35:36 Europe/Berlin] - password (varchar(255))
+[27-Oct-2025 04:35:36 Europe/Berlin] - student_id (varchar(50))
+[27-Oct-2025 04:35:36 Europe/Berlin] - academic_year (varchar(20))
+[27-Oct-2025 04:35:36 Europe/Berlin] - course (varchar(50))
+[27-Oct-2025 04:35:36 Europe/Berlin] - role_id (int(11))
+[27-Oct-2025 04:35:36 Europe/Berlin] - created_at (datetime)
+[27-Oct-2025 04:35:36 Europe/Berlin] - updated_at (datetime)
+[27-Oct-2025 04:35:36 Europe/Berlin] - profile_image (varchar(255))
+[27-Oct-2025 04:35:36 Europe/Berlin] - status (enum('Active','Inactive'))
+[27-Oct-2025 04:35:36 Europe/Berlin] - classification (enum('Regular','Irregular'))
+[27-Oct-2025 04:35:37 Europe/Berlin] SQL Query: SELECT CONCAT(firstname, ' ', lastname) AS full_name, `student_id` AS `student_id`, `firstname` AS `firstname`, `lastname` AS `lastname`, `course` AS `course`, `classification` AS `classification` FROM signin_db WHERE student_id = ?
+[27-Oct-2025 04:35:37 Europe/Berlin] Student ID: 2022-10873
+[27-Oct-2025 04:35:37 Europe/Berlin] Fetched student data: Array
+(
+    [full_name] => rozz KREWPEK
+    [student_id] => 2022-10873
+    [firstname] => rozz
+    [lastname] => KREWPEK
+    [course] => BSIT
+    [classification] => Regular
+)
+
+[27-Oct-2025 04:35:37 Europe/Berlin] Final student data: Array
+(
+    [full_name] => rozz KREWPEK
+    [student_id] => 2022-10873
+    [firstname] => rozz
+    [lastname] => KREWPEK
+    [course] => BSIT
+    [classification] => Regular
+)
+
+[27-Oct-2025 04:35:37 Europe/Berlin] Available tables:
+[27-Oct-2025 04:35:37 Europe/Berlin] - activity_log_db
+[27-Oct-2025 04:35:37 Europe/Berlin] - assign_curriculum
+[27-Oct-2025 04:35:37 Europe/Berlin] - calendar
+[27-Oct-2025 04:35:37 Europe/Berlin] - curriculum
+[27-Oct-2025 04:35:37 Europe/Berlin] - feedback_db
+[27-Oct-2025 04:35:37 Europe/Berlin] - grades_db
+[27-Oct-2025 04:35:37 Europe/Berlin] - irregular_db
+[27-Oct-2025 04:35:37 Europe/Berlin] - list_db
+[27-Oct-2025 04:35:37 Europe/Berlin] - password_resets
+[27-Oct-2025 04:35:37 Europe/Berlin] - roles
+[27-Oct-2025 04:35:37 Europe/Berlin] - signin_db
+[27-Oct-2025 04:35:37 Europe/Berlin] - students_db
+[27-Oct-2025 04:35:37 Europe/Berlin] - users
+[27-Oct-2025 04:35:37 Europe/Berlin] Columns in signin_db:
+[27-Oct-2025 04:35:37 Europe/Berlin] - id (int(11))
+[27-Oct-2025 04:35:37 Europe/Berlin] - firstname (varchar(100))
+[27-Oct-2025 04:35:37 Europe/Berlin] - lastname (varchar(100))
+[27-Oct-2025 04:35:37 Europe/Berlin] - email (varchar(255))
+[27-Oct-2025 04:35:37 Europe/Berlin] - password (varchar(255))
+[27-Oct-2025 04:35:37 Europe/Berlin] - student_id (varchar(50))
+[27-Oct-2025 04:35:37 Europe/Berlin] - academic_year (varchar(20))
+[27-Oct-2025 04:35:37 Europe/Berlin] - course (varchar(50))
+[27-Oct-2025 04:35:37 Europe/Berlin] - role_id (int(11))
+[27-Oct-2025 04:35:37 Europe/Berlin] - created_at (datetime)
+[27-Oct-2025 04:35:37 Europe/Berlin] - updated_at (datetime)
+[27-Oct-2025 04:35:37 Europe/Berlin] - profile_image (varchar(255))
+[27-Oct-2025 04:35:37 Europe/Berlin] - status (enum('Active','Inactive'))
+[27-Oct-2025 04:35:37 Europe/Berlin] - classification (enum('Regular','Irregular'))

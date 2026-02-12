@@ -1,0 +1,7 @@
+program,year_semester,subject_code,course_title,lec_units,lab_units,total_units,prerequisites
+BSCS,1-1,CS101,Introduction to Computer Science,3,1,4,
+BSCS,1-1,MATH101,College Algebra,3,0,3,
+BSCS,1-2,CS102,Computer Programming 1,3,1,4,CS101
+BSCS,1-2,MATH102,Discrete Mathematics,3,0,3,MATH101
+BSIT,1-1,IT101,Introduction to IT,3,1,4,
+BSIT,1-1,MATH101,College Algebra,3,0,3,
