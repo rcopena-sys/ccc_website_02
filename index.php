@@ -414,7 +414,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 ?>
             </div>
         <?php endif; ?>
-            TEST
+            
         <form method="POST" action="">
             <input type="email" name="email" placeholder="Email" value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>" required>
 
