@@ -1,5 +1,7 @@
 <?php
-require_once 'config.php';
+session_start();
+require_once __DIR__ . '/../db_connect.php';
+
 
 $success = false;
 $error = '';
@@ -138,7 +140,7 @@ if ($student_result) {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Grade Management System</title> <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <title>Grades</title> <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
     <style>
@@ -157,62 +159,12 @@ if ($student_result) {
     <div class="container py-5">
         <div class="row mb-4">
             <div class="col-12">
-                <h2 class="mb-3"><i class="bi bi-mortarboard"></i> Grade Management System</h2>
+                <h2 class="mb-3"><i class="bi bi-mortarboard"></i> Grades viewing </h2>
             </div>
         </div>
 
         <!-- Statistics Cards -->
-        <div class="row mb-4">
-            <div class="col-md-3">
-                <div class="card stats-card">
-                    <div class="card-body text-center">
-                        <h5 class="card-title">Total Grades</h5>
-                        <?php
-                        $total_result = $conn->query("SELECT COUNT(*) as total FROM grades_db");
-                        $total = $total_result ? $total_result->fetch_assoc()['total'] : 0;
-                        ?>
-                        <h3><?= $total ?></h3>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card stats-card">
-                    <div class="card-body text-center">
-                        <h5 class="card-title">Unique Students</h5>
-                        <?php
-                        $students_result = $conn->query("SELECT COUNT(DISTINCT student_id) as total FROM grades_db");
-                        $students = $students_result ? $students_result->fetch_assoc()['total'] : 0;
-                        ?>
-                        <h3><?= $students ?></h3>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card stats-card">
-                    <div class="card-body text-center">
-                        <h5 class="card-title">Unique Courses</h5>
-                        <?php
-                        $courses_result = $conn->query("SELECT COUNT(DISTINCT course_code) as total FROM grades_db");
-                        $courses = $courses_result ? $courses_result->fetch_assoc()['total'] : 0;
-                        ?>
-                        <h3><?= $courses ?></h3>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card stats-card">
-                    <div class="card-body text-center">
-                        <h5 class="card-title">Average Grade</h5>
-                        <?php
-                        $avg_result = $conn->query("SELECT AVG(CAST(final_grade AS DECIMAL(3,2))) as avg_grade FROM grades_db WHERE final_grade REGEXP '^[0-9]+\.?[0-9]*$'");
-                        $avg_grade = $avg_result ? round($avg_result->fetch_assoc()['avg_grade'], 2) : 'N/A';
-                        ?>
-                        <h3><?= $avg_grade ?></h3>
-                    </div>
-                </div>
-            </div>
-        </div>
-
+        
         <?php if ($success === true): ?>
             <div class="alert alert-success alert-dismissible fade show">
                 <i class="bi bi-check-circle"></i> <?= htmlspecialchars($success_message ?? 'Operation completed successfully!') ?>

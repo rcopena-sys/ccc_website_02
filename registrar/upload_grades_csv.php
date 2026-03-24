@@ -1,6 +1,5 @@
 <?php
-require_once 'config.php';
-// Handle CSV upload for grades_db
+require_once __DIR__ . '/../db_connect.php';
 
 $success = false;
 $error = '';
@@ -69,10 +68,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['grades_csv'])) {
         </div>
         <div class="d-flex gap-2">
             <button type="submit" class="btn btn-primary">Upload</button>
-            <a href="download_grade_template.php" class="btn btn-outline-primary" download>
+             <a href="download_grade_template.php" class="btn btn-outline-primary" download>
                 <i class="bi bi-download me-1"></i>Download Sample CSV
             </a>
-            <a href="stugra.php" class="btn btn-secondary ms-auto">Back</a>
+            <a href="studentgrade.php" class="btn btn-secondary ms-auto">Back</a>
         </div>
     </form>
     <div class="mt-4">

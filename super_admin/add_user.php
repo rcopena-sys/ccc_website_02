@@ -1,7 +1,11 @@
 <?php
 session_start();
-require_once '../config/connect.php';
+require_once '../db_connect.php';
 require_once '../config/global_func.php';
+// PHPMailer for sending credentials
+require_once __DIR__ . '/../vendor/autoload.php';
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
 
 // Check if user is logged in and is admin
 if (!isset($_SESSION['user_id']) || $_SESSION['role_id'] != 1) {
@@ -12,6 +16,17 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role_id'] != 1) {
 $message = '';
 $error = '';
 
+// Generate a random password for new users
+function generateRandomPassword($length = 12) {
+    $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%^&*';
+    $password = '';
+    $max = strlen($chars) - 1;
+    for ($i = 0; $i < $length; $i++) {
+        $password .= $chars[random_int(0, $max)];
+    }
+    return $password;
+}
+
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
@@ -19,13 +34,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $firstname = clean_input($conn, $_POST['firstname'] ?? '');
         $lastname = clean_input($conn, $_POST['lastname'] ?? '');
         $email = clean_input($conn, $_POST['email'] ?? '');
-        $password = $_POST['password'] ?? '';
-        $confirm_password = $_POST['confirm_password'] ?? '';
+        // Auto-generate a strong password instead of asking the user
+        $password = generateRandomPassword();
         // Convert empty student_id to NULL
         $student_id = !empty(trim($_POST['student_id'] ?? '')) ? clean_input($conn, $_POST['student_id']) : null;
         $course = clean_input($conn, $_POST['course'] ?? '');
         $classification = clean_input($conn, $_POST['classification'] ?? 'regular'); // Default to regular
         $role_id = intval($_POST['role_id'] ?? 6); // Default to student role
+
+        // Default: no department assigned
+        $department_id = null;
 
         // Determine whether the selected role represents a student role
         $isStudentRole = false;
@@ -52,20 +70,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         // Validation
-        if (empty($firstname) || empty($lastname) || empty($email) || empty($password)) {
+        if (empty($firstname) || empty($lastname) || empty($email)) {
             throw new Exception('All fields are required');
         }
         
-        // Check dean account limit (maximum 2 dean accounts allowed)
-        if ($role_id == 2) {
-            $deanCountStmt = $conn->prepare("SELECT COUNT(*) as count FROM signin_db WHERE role_id = 2");
-            $deanCountStmt->execute();
-            $deanResult = $deanCountStmt->get_result();
-            $deanCount = $deanResult->fetch_assoc()['count'];
-            $deanCountStmt->close();
-            
-            if ($deanCount >= 2) {
-                throw new Exception('Maximum of 2 dean accounts allowed. Cannot create more dean accounts.');
+        // Check dean account limit (maximum 2 dean accounts allowed across all dean roles)
+        $currentRoleNameLower = strtolower($rrow['role_name'] ?? '');
+        $isDeanRole = (strpos($currentRoleNameLower, 'dean') !== false);
+
+        if ($isDeanRole) {
+            // Map selected dean department (e.g., DCI, DBA, DBE, DAS) to departments.id
+            $department_code = strtoupper(trim($_POST['department_code'] ?? ''));
+            if (empty($department_code)) {
+                throw new Exception('Please select which dean (DCI, DBA, DBE, DAS).');
+            }
+
+            $allowedDepartments = ['DCI', 'DBA', 'DBE', 'DAS'];
+            if (!in_array($department_code, $allowedDepartments, true)) {
+                throw new Exception('Invalid dean department selected.');
+            }
+
+            $deptStmt = $conn->prepare("SELECT id FROM departments WHERE code = ? LIMIT 1");
+            if ($deptStmt) {
+                $deptStmt->bind_param('s', $department_code);
+                $deptStmt->execute();
+                $deptRes = $deptStmt->get_result();
+                if ($deptRow = $deptRes->fetch_assoc()) {
+                    $department_id = (int)$deptRow['id'];
+                } else {
+                    $deptStmt->close();
+                    throw new Exception('Selected dean department does not exist in departments table.');
+                }
+                $deptStmt->close();
+            }
+
+            $deanCountStmt = $conn->prepare("SELECT COUNT(*) AS count
+                                              FROM signin_db s
+                                              JOIN roles r ON s.role_id = r.role_id
+                                              WHERE LOWER(r.role_name) LIKE '%dean%'");
+            if ($deanCountStmt) {
+                $deanCountStmt->execute();
+                $deanResult = $deanCountStmt->get_result();
+                $deanCountRow = $deanResult->fetch_assoc();
+                $deanCount = $deanCountRow['count'] ?? 0;
+                $deanCountStmt->close();
+
+                if ($deanCount >= 2) {
+                    throw new Exception('Maximum of 2 dean accounts allowed. Cannot create more dean accounts.');
+                }
             }
         }
 
@@ -128,15 +180,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new Exception('Only @ccc.edu.ph email addresses are accepted. Please use your school email.');
         }
 
-        // Enhanced password validation
-        $password_validation = validate_password_strength($password);
-        if (!$password_validation['valid']) {
-            throw new Exception($password_validation['message']);
-        }
-
-        if ($password !== $confirm_password) {
-            throw new Exception('Passwords do not match');
-        }
+        // Password is system-generated; no need to validate user input or confirm
 
         // Check if email already exists
         $stmt = $conn->prepare("SELECT id FROM signin_db WHERE email = ?");
@@ -148,42 +192,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new Exception('Email already exists');
         }
         
-        // Check if trying to create a new dean when one already exists for the same dean type
-        $deanRoleNames = ['DBA Dean', 'DAS Dean', 'DTE Dean', 'Dean'];
-        if (in_array(strtolower($rrow['role_name'] ?? ''), array_map('strtolower', $deanRoleNames))) {
-            // Check if a user with this specific dean role already exists
-            $deanCheck = $conn->prepare("SELECT id FROM signin_db s JOIN roles r ON s.role_id = r.role_id WHERE r.role_name = ? LIMIT 1");
-            $deanCheck->bind_param("s", $rrow['role_name']);
-            $deanCheck->execute();
-            $deanResult = $deanCheck->get_result();
-            
-            if ($deanResult->num_rows > 0) {
-                throw new Exception('A ' . htmlspecialchars($rrow['role_name']) . ' already exists in the system. Only one ' . htmlspecialchars($rrow['role_name']) . ' account is allowed.');
-            }
-            $deanCheck->close();
-        }
+        // Dean role uniqueness per type is no longer enforced; only a global limit of 2 dean accounts applies
 
-        // Hash password with stronger options
-        $hashed_password = password_hash($password, PASSWORD_ARGON2ID, [
-            'memory_cost' => 65536,
-            'time_cost' => 4,
-            'threads' => 3
-        ]);
-        
-        // If Argon2ID is not available, fall back to bcrypt
+        // Hash password (bcrypt) before storing
+        $hashed_password = password_hash($password, PASSWORD_BCRYPT);
         if ($hashed_password === false) {
-            $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+            throw new Exception('Failed to hash password');
         }
 
-        // Insert new user
+        // Insert new user (include department_id so deans are tied to a department)
         $stmt = $conn->prepare("INSERT INTO signin_db 
-            (firstname, lastname, email, password, student_id, course, classification, status, role_id) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);");
+            (firstname, lastname, email, password, student_id, course, classification, status, role_id, department_id) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);");
         
         // Use 's' for string or 'i' for integer based on the parameter type
         // For NULL values, we need to handle them specially
         $status = 'active'; // Set default status
-        $stmt->bind_param("sssssssss", 
+        $stmt->bind_param("ssssssssii", 
             $firstname, 
             $lastname, 
             $email, 
@@ -192,12 +217,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $course, 
             $classification, 
             $status,
-            $role_id
+            $role_id,
+            $department_id
         );
         
         // If student_id is NULL, we need to set it to NULL in the database
         if ($stmt->execute()) {
             $message = 'User added successfully!';
+
+            // Send credentials email via PHPMailer
+            try {
+                $mail = new PHPMailer(true);
+
+                // Server settings - adjust to your SMTP config
+                $mail->isSMTP();
+                $mail->Host       = 'smtp.gmail.com';      // SMTP server
+                $mail->SMTPAuth   = true;
+                $mail->Username = 'rozzo4968@gmail.com';
+                $mail->Password = 'elduyrelyltgjhdr'; // Gmail App Password
+                $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+                $mail->Port       = 587;
+
+                // From / To
+                $mail->setFrom('rozzo4968@gmail.com', 'CCC Admin');
+                $mail->addAddress($email, $firstname . ' ' . $lastname);
+
+                // Content
+                $mail->isHTML(true);
+                $mail->Subject = 'Your CCC Curriculum Evaluation Account Credentials';
+                $mail->Body    = '<p>Dear ' . htmlspecialchars($firstname . ' ' . $lastname, ENT_QUOTES, 'UTF-8') . ',</p>' .
+                                 '<p>Your account has been created successfully. Here are your login credentials:</p>' .
+                                 '<ul>' .
+                                 '<li><strong>Email:</strong> ' . htmlspecialchars($email, ENT_QUOTES, 'UTF-8') . '</li>' .
+                                 '<li><strong>Password:</strong> ' . htmlspecialchars($password, ENT_QUOTES, 'UTF-8') . '</li>' .
+                                 '</ul>' .
+                                 '<p>For security reasons, please change your password after logging in for the first time.</p>' .
+                                 '<p>Best regards,<br>CCC Admin</p>';
+
+                $mail->AltBody = "Dear {$firstname} {$lastname},\n\n" .
+                                 "Your account has been created.\n" .
+                                 "Email: {$email}\n" .
+                                 "Password: {$password}\n\n" .
+                                 "Please change your password after first login.";
+
+                $mail->send();
+            } catch (Exception $e) {
+                error_log('PHPMailer error (add_user): ' . $e->getMessage());
+            }
             // Log activity (non-fatal)
             try {
                 $adminId = $_SESSION['user_id'] ?? null;
@@ -232,6 +298,12 @@ $roles = [];
 $result = $conn->query("SELECT * FROM roles ORDER BY role_name");
 if ($result) {
     while ($row = $result->fetch_assoc()) {
+        // Exclude student-related roles (Student, BSIT, BSCS, etc.) from the dropdown
+        $roleNameLower = strtolower($row['role_name'] ?? '');
+        // Also explicitly exclude role_id = 6 (Student default role)
+        if ((int)($row['role_id'] ?? 0) === 6 || $roleNameLower === 'bsit' || $roleNameLower === 'bscs' || strpos($roleNameLower, 'student') !== false) {
+            continue;
+        }
         $roles[] = $row;
     }
 }
@@ -802,40 +874,7 @@ if ($result) {
                         </div>
                     </div>
                     
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
-                        <div>
-                            <label for="password" class="form-group-label">Password <span class="required-indicator">*</span></label>
-                            <div style="position: relative;">
-                                <input type="password" class="form-control" id="password" name="password" required
-                                       minlength="8" 
-                                       pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}"
-                                       title="Password must be at least 8 characters long with uppercase, lowercase, number, and special character"
-                                       autocomplete="new-password">
-                                <span class="password-toggle" onclick="togglePassword('password')">
-                                    <i class="fas fa-eye"></i>
-                                </span>
-                                <div class="invalid-feedback">
-                                    Password must be at least 8 characters long with uppercase, lowercase, number, and special character
-                                </div>
-                                <div class="password-strength">
-                                    <div class="password-strength-bar" id="password-strength"></div>
-                                </div>
-                                <span class="password-strength-text" id="password-strength-text">Enter a password to see strength</span>
-                            </div>
-                        <div>
-                            <label for="confirm_password" class="form-group-label">Confirm Password <span class="required-indicator">*</span></label>
-                            <div style="position: relative;">
-                                <input type="password" class="form-control" id="confirm_password" 
-                                       name="confirm_password" required>
-                                <span class="password-toggle" onclick="togglePassword('confirm_password')">
-                                    <i class="fas fa-eye"></i>
-                                </span>
-                                <div class="invalid-feedback">
-                                    Passwords do not match
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <!-- Password fields removed: password is now auto-generated and emailed to the user -->
                     
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
                         <div class="student-fields">
@@ -890,6 +929,21 @@ if ($result) {
                         </div>
                     </div>
                     
+                    <!-- Dean department selection: shown only when a Dean role is chosen -->
+                    <div id="dean_department_group" style="display: none; margin-bottom: 20px;">
+                        <label for="department_code" class="form-group-label">Which Dean (Department) <span class="required-indicator">*</span></label>
+                        <select class="form-select" id="department_code" name="department_code">
+                            <option value="">Select Department</option>
+                            <option value="DCI" <?php echo (isset($_POST['department_code']) && $_POST['department_code'] === 'DCI') ? 'selected' : ''; ?>>DCI</option>
+                            <option value="DBA" <?php echo (isset($_POST['department_code']) && $_POST['department_code'] === 'DBA') ? 'selected' : ''; ?>>DBA</option>
+                            <option value="DBE" <?php echo (isset($_POST['department_code']) && $_POST['department_code'] === 'DBE') ? 'selected' : ''; ?>>DBE</option>
+                            <option value="DAS" <?php echo (isset($_POST['department_code']) && $_POST['department_code'] === 'DAS') ? 'selected' : ''; ?>>DAS</option>
+                        </select>
+                        <div class="invalid-feedback">
+                            Please select which dean department this account belongs to.
+                        </div>
+                    </div>
+                    
                     <div style="display: flex; gap: 12px; margin-top: 30px;">
                         <button type="submit" class="btn-submit" style="flex: 1;">
                             <i class="fas fa-user-plus me-2"></i> Add User
@@ -918,9 +972,6 @@ if ($result) {
             // Loop over them and prevent submission
             Array.prototype.slice.call(forms).forEach(function (form) {
                 form.addEventListener('submit', function (event) {
-                    // Check passwords match
-                    const password = document.getElementById('password');
-                    const confirmPassword = document.getElementById('confirm_password');
                     const emailInput = document.getElementById('email');
                     const firstNameInput = document.getElementById('firstname');
                     const lastNameInput = document.getElementById('lastname');
@@ -946,12 +997,6 @@ if ($result) {
                         emailInput.setCustomValidity('');
                     }
                     
-                    if (password.value !== confirmPassword.value) {
-                        confirmPassword.setCustomValidity("Passwords don't match");
-                    } else {
-                        confirmPassword.setCustomValidity('');
-                    }
-                    
                     if (!form.checkValidity()) {
                         event.preventDefault()
                         event.stopPropagation()
@@ -962,102 +1007,7 @@ if ($result) {
             })
         })()
         
-        // Password strength checker
-        function checkPasswordStrength(password) {
-            let score = 0;
-            let feedback = [];
-            
-            // Length checks
-            if (password.length >= 8) score++;
-            if (password.length >= 12) score++;
-            if (password.length >= 16) score++;
-            
-            // Character variety
-            if (/[a-z]/.test(password)) {
-                score++;
-                feedback.push('lowercase');
-            }
-            if (/[A-Z]/.test(password)) {
-                score++;
-                feedback.push('uppercase');
-            }
-            if (/[0-9]/.test(password)) {
-                score++;
-                feedback.push('numbers');
-            }
-            if (/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
-                score++;
-                feedback.push('special characters');
-            }
-            
-            // Calculate percentage
-            let percentage = Math.min((score / 8) * 100, 100);
-            
-            // Determine strength level and color
-            let strength, color, text;
-            if (score < 3) {
-                strength = 'weak';
-                color = 'danger';
-                text = 'Weak password - add more character types';
-            } else if (score < 5) {
-                strength = 'fair';
-                color = 'warning';
-                text = 'Fair password - could be stronger';
-            } else if (score < 7) {
-                strength = 'good';
-                color = 'info';
-                text = 'Good password';
-            } else {
-                strength = 'strong';
-                color = 'success';
-                text = 'Strong password!';
-            }
-            
-            return {
-                score: score,
-                percentage: percentage,
-                strength: strength,
-                color: color,
-                text: text,
-                feedback: feedback
-            };
-        }
-        
-        // Real-time password strength checking
-        document.getElementById('password').addEventListener('input', function(e) {
-            const password = e.target.value;
-            const strengthBar = document.getElementById('password-strength');
-            const strengthText = document.getElementById('password-strength-text');
-            
-            if (password.length > 0) {
-                const strength = checkPasswordStrength(password);
-                strengthBar.style.width = strength.percentage + '%';
-                strengthBar.className = 'progress-bar bg-' + strength.color;
-                strengthText.textContent = strength.text;
-                strengthText.className = 'form-text text-' + strength.color;
-            } else {
-                strengthBar.style.width = '0%';
-                strengthBar.className = 'progress-bar';
-                strengthText.textContent = 'Enter a password to see strength';
-                strengthText.className = 'form-text';
-            }
-        });
-
-        // Toggle password visibility
-        function togglePassword(fieldId) {
-            const field = document.getElementById(fieldId);
-            const icon = field.nextElementSibling.querySelector('i');
-            
-            if (field.type === 'password') {
-                field.type = 'text';
-                icon.classList.remove('fa-eye');
-                icon.classList.add('fa-eye-slash');
-            } else {
-                field.type = 'password';
-                icon.classList.remove('fa-eye-slash');
-                icon.classList.add('fa-eye');
-            }
-        }
+        // Password fields removed: no client-side password validation or strength checking needed
 
         // Real-time email validation
         document.addEventListener('DOMContentLoaded', function () {
@@ -1107,6 +1057,8 @@ if ($result) {
 
             const roleSelect = document.getElementById('role_id');
             const studentFields = document.querySelectorAll('.student-fields');
+            const deanDeptGroup = document.getElementById('dean_department_group');
+            const deanDeptSelect = document.getElementById('department_code');
 
             function updateFieldVisibility() {
                 if (!roleSelect) return;
@@ -1116,6 +1068,7 @@ if ($result) {
                 const isStudent = roleName.includes('student') || 
                                 roleName === 'bscs' || 
                                 roleName === 'bsit';
+                const isDean = roleName.includes('dean');
 
                 studentFields.forEach(function (el) {
                     // show for student, hide otherwise
@@ -1126,6 +1079,18 @@ if ($result) {
                         else inp.removeAttribute('required');
                     });
                 });
+
+                // Dean department visibility and required flag
+                if (deanDeptGroup && deanDeptSelect) {
+                    if (isDean) {
+                        deanDeptGroup.style.display = '';
+                        deanDeptSelect.setAttribute('required', 'required');
+                    } else {
+                        deanDeptGroup.style.display = 'none';
+                        deanDeptSelect.removeAttribute('required');
+                        deanDeptSelect.value = '';
+                    }
+                }
             }
 
             if (roleSelect) {

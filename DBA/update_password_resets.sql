@@ -1,0 +1,2 @@
+ALTER TABLE password_resets 
+ADD COLUMN token VARCHAR(64) NULL AFTER otp;

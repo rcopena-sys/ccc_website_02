@@ -1,11 +1,5 @@
 <?php
-// Database connection
-$conn = new mysqli("localhost", "root", "", "ccc_curriculum_evaluation");
-
-// Check connection
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
+require_once __DIR__ . '/../db_connect.php';
 
 // Get all tables in the database
 $tables = $conn->query("SHOW TABLES");

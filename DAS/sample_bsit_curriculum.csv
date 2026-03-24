@@ -1,0 +1,47 @@
+year_semester,subject_code,course_title,lec_units,lab_units,total_units,prerequisites
+1-1,IT101,Introduction to Information Technology,3.0,1.0,4.0,None
+1-1,ENG101,English Communication Skills,3.0,0.0,3.0,None
+1-1,MATH101,College Algebra,3.0,0.0,3.0,None
+1-1,FIL101,Komunikasyon sa Akademikong Filipino,3.0,0.0,3.0,None
+1-1,PE101,Physical Education 1,2.0,0.0,2.0,None
+1-1,NSTP101,National Service Training Program 1,3.0,0.0,3.0,None
+1-2,IT102,Computer Programming 1,2.0,2.0,4.0,IT101
+1-2,ENG102,Technical Writing,3.0,0.0,3.0,ENG101
+1-2,MATH102,Trigonometry,3.0,0.0,3.0,MATH101
+1-2,FIL102,Pagbasa at Pagsulat Tungo sa Pananaliksik,3.0,0.0,3.0,FIL101
+1-2,PE102,Physical Education 2,2.0,0.0,2.0,PE101
+1-2,NSTP102,National Service Training Program 2,3.0,0.0,3.0,NSTP101
+2-1,IT201,Computer Programming 2,2.0,2.0,4.0,IT102
+2-1,IT202,Data Structures and Algorithms,3.0,1.0,4.0,IT102
+2-1,IT203,Computer Organization and Architecture,3.0,1.0,4.0,IT101
+2-1,STAT201,Statistics for IT,3.0,0.0,3.0,MATH102
+2-1,PHIL201,Logic and Ethics,3.0,0.0,3.0,None
+2-1,PE201,Physical Education 3,2.0,0.0,2.0,PE102
+2-2,IT204,Object-Oriented Programming,2.0,2.0,4.0,IT201
+2-2,IT205,Database Management Systems,3.0,1.0,4.0,IT202
+2-2,IT206,Computer Networks,3.0,1.0,4.0,IT203
+2-2,IT207,Web Development,2.0,2.0,4.0,IT201
+2-2,ECON201,Microeconomics,3.0,0.0,3.0,None
+2-2,PE202,Physical Education 4,2.0,0.0,2.0,PE201
+3-1,IT301,Software Engineering,3.0,1.0,4.0,IT204
+3-1,IT302,Operating Systems,3.0,1.0,4.0,IT203
+3-1,IT303,Information Security,3.0,1.0,4.0,IT206
+3-1,IT304,Mobile Application Development,2.0,2.0,4.0,IT204
+3-1,IT305,Systems Analysis and Design,3.0,1.0,4.0,IT301
+3-1,RIZAL201,Life and Works of Rizal,3.0,0.0,3.0,None
+3-2,IT306,Web Technologies,2.0,2.0,4.0,IT207
+3-2,IT307,Data Communications,3.0,1.0,4.0,IT206
+3-2,IT308,IT Project Management,3.0,1.0,4.0,IT305
+3-2,IT309,Cloud Computing,2.0,2.0,4.0,IT206
+3-2,IT310,IT Elective 1,3.0,1.0,4.0,IT204
+3-2,IT311,IT Elective 2,3.0,1.0,4.0,IT204
+4-1,IT401,Capstone Project 1,1.0,5.0,6.0,IT308
+4-1,IT402,IT Internship,0.0,6.0,6.0,IT308
+4-1,IT403,IT Elective 3,3.0,1.0,4.0,IT204
+4-1,IT404,IT Elective 4,3.0,1.0,4.0,IT204
+4-1,IT405,IT Elective 5,3.0,1.0,4.0,IT204
+4-2,IT406,Capstone Project 2,1.0,5.0,6.0,IT401
+4-2,IT407,IT Elective 6,3.0,1.0,4.0,IT204
+4-2,IT408,IT Elective 7,3.0,1.0,4.0,IT204
+4-2,IT409,IT Elective 8,3.0,1.0,4.0,IT204
+4-2,IT410,IT Elective 9,3.0,1.0,4.0,IT204 

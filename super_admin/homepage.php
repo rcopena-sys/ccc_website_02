@@ -1009,7 +1009,12 @@ $json_table = json_encode($table_array);
                 
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
                     <div>
-                        <h2 style="color: #1e3a5f; font-weight: 700; margin-bottom: 5px;">User Accounts</h2>
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+                            <h2 style="color: #1e3a5f; font-weight: 700; margin: 0;">User Accounts</h2>
+                            <button type="button" id="toggle-archived-btn" class="btn btn-outline-warning btn-sm">
+                                Show Archived Users
+                            </button>
+                        </div>
                         <p style="color: #64748b; margin: 0;">View and manage all system users</p>
                     </div>
                     <div style="position: relative; width: 300px;">
@@ -1023,7 +1028,6 @@ $json_table = json_encode($table_array);
                         <table id="userTable" class="table table-striped" style="width:100%; margin: 0;">
                             <thead style="background: linear-gradient(135deg, #4285f4, #669df6); color: white;">
                                 <tr>
-                                    <th style="color: white; font-weight: 600; padding: 15px 12px; border-right: 1px solid rgba(255, 255, 255, 0.1);">ID</th>
                                     <th style="color: white; font-weight: 600; padding: 15px 12px; border-right: 1px solid rgba(255, 255, 255, 0.1);">Name</th>
                                     <th style="color: white; font-weight: 600; padding: 15px 12px; border-right: 1px solid rgba(255, 255, 255, 0.1);">Email</th>
                                     <th style="color: white; font-weight: 600; padding: 15px 12px; border-right: 1px solid rgba(255, 255, 255, 0.1);">Student ID</th>
@@ -1056,61 +1060,47 @@ $json_table = json_encode($table_array);
                                         } else {
                                             $statusClass = 'text-secondary'; // For any other status
                                         }
-                                        $student_id = htmlspecialchars($row['student_id'], ENT_QUOTES);
-                                        $userId = htmlspecialchars($row['id'], ENT_QUOTES);
-                                        $fullName = htmlspecialchars($row['firstname'] . ' ' . $row['lastname'], ENT_QUOTES);
-                                        $email = htmlspecialchars($row['email'], ENT_QUOTES);
-                                        $roleName = htmlspecialchars($row['role_name'], ENT_QUOTES);
-                                        $statusDisplay = htmlspecialchars($status, ENT_QUOTES);
-                                        $classification = htmlspecialchars($row['classification'], ENT_QUOTES);
+                                        $student_id = htmlspecialchars($row['student_id'] ?? '', ENT_QUOTES);
+                                        $userId = htmlspecialchars($row['id'] ?? '', ENT_QUOTES);
+                                        $fullName = htmlspecialchars(($row['firstname'] ?? '') . ' ' . ($row['lastname'] ?? ''), ENT_QUOTES);
+                                        $email = htmlspecialchars($row['email'] ?? '', ENT_QUOTES);
+                                        $roleName = htmlspecialchars($row['role_name'] ?? '', ENT_QUOTES);
+                                        $statusDisplay = htmlspecialchars($status ?? '', ENT_QUOTES);
+                                        $classification = htmlspecialchars($row['classification'] ?? '', ENT_QUOTES);
                                                 
-                                                // Show classification dropdown only for student roles (BSIT, BSCS)
+                                                // Show classification as plain text (no dropdown)
 $classificationDropdown = "";
 if (in_array(strtolower($roleName), ['bsit', 'bscs'])) {
-    $classificationDropdown = "
-        <td>
-            <div class='dropdown'>
-                <button class='btn btn-sm dropdown-toggle status-toggle " . ($classification === 'Irregular' ? 'btn-warning' : 'btn-success') . "' 
-                        type='button' 
-                        data-bs-toggle='dropdown' 
-                        aria-expanded='false'
-                        data-user-id='" . $userId . "'
-                        data-current-classification='" . $classification . "'>
-                    " . $classification . "
-                </button>
-                <ul class='dropdown-menu'>
-                    <li><a class='dropdown-item classification-option' href='#' data-value='Regular'>Regular</a></li>
-                    <li><a class='dropdown-item classification-option' href='#' data-value='Irregular'>Irregular</a></li>
-                </ul>
-            </div>
-        </td>";
+    $classificationDropdown = "<td style='padding: 15px 12px; color: #1e3a5f;'><span>" . $classification . "</span></td>";
 } else {
-    $classificationDropdown = "<td><span class='text-muted'></span></td>";
+    $classificationDropdown = "<td style='padding: 15px 12px; color: #1e3a5f;'><span class='text-muted'></span></td>";
 }
 
-echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px solid rgba(66, 133, 244, 0.1); transition: all 0.3s ease;'>
-    <td style='padding: 15px 12px; color: #1e3a5f;'>" . $userId . "</td>
-    <td style='padding: 15px 12px; color: #1e3a5f;'>" . $fullName . "</td>
-    <td style='padding: 15px 12px; color: #1e3a5f;'>" . $email . "</td>
-    <td style='padding: 15px 12px; color: #1e3a5f;'>" . $student_id . "</td>
-    <td style='padding: 15px 12px; color: #1e3a5f;'>" . $roleName . "</td>
-    <td style='padding: 15px 12px; color: #1e3a5f;'><span class='" . $statusClass . "'>" . $statusDisplay . "</span></td>
-    " . $classificationDropdown . "
-    <td style='padding: 15px 12px; text-align: center;'>
-        <div class='action-buttons'>
-            <button type='button' class='btn btn-action btn-edit' title='Edit User' data-id='" . $userId . "' data-name='" . $fullName . "' data-email='" . $email . "' data-status='" . $statusDisplay . "' onclick='openSimpleEditModal(" . $userId . ", \"" . $fullName . "\", \"" . $email . "\", \"" . $statusDisplay . "\")'>
-                <i class='fas fa-edit'></i>
-            </button>" . 
-            (($status === 'Archived' || $status === 'Inactive') ? 
-                "<button type='button' class='btn btn-action btn-restore' title='Restore User' data-id='" . $userId . "' onclick='quickRestoreUser(" . $userId . ")'>
-                    <i class='fas fa-undo'></i>
-                </button>" 
-                : 
-                ""
-            ) . "
-        </div>
-    </td>
-</tr>";
+echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px solid rgba(66, 133, 244, 0.1); transition: all 0.3s ease;'>\n" .
+    "    <td style='padding: 15px 12px; color: #1e3a5f;'>" . $fullName . "</td>\n" .
+    "    <td style='padding: 15px 12px; color: #1e3a5f;'>" . $email . "</td>\n" .
+    "    <td style='padding: 15px 12px; color: #1e3a5f;'>" . $student_id . "</td>\n" .
+    "    <td style='padding: 15px 12px; color: #1e3a5f;'>" . $roleName . "</td>\n" .
+    "    <td style='padding: 15px 12px; color: #1e3a5f;'><span class='" . $statusClass . "'>" . $statusDisplay . "</span></td>\n" .
+    $classificationDropdown .
+    "    <td style='padding: 15px 12px; text-align: center;'>\n" .
+    "        <div class='action-buttons'>\n" .
+    // Edit button
+    "            <button type='button' class='btn btn-action btn-edit' title='Edit User' data-id='" . $userId . "' data-name='" . $fullName . "' data-email='" . $email . "' data-status='" . $statusDisplay . "' onclick='openSimpleEditModal(" . $userId . ", \"" . $fullName . "\", \"" . $email . "\", \"" . $statusDisplay . "\")'>\n" .
+    "                <i class='fas fa-edit'></i>\n" .
+    "            </button>\n" .
+    // Archive or restore button depending on status
+    (($status === 'Archived' || $status === 'Inactive')
+        ? "            <button type='button' class='btn btn-action btn-restore' title='Restore User' data-id='" . $userId . "' onclick='quickRestoreUser(" . $userId . ")'>\n" .
+          "                <i class='fas fa-undo'></i>\n" .
+          "            </button>\n"
+        : "            <button type='button' class='btn btn-action btn-archive' title='Archive User' data-id='" . $userId . "' onclick='quickArchiveUser(" . $userId . ")'>\n" .
+          "                <i class='fas fa-archive'></i>\n" .
+          "            </button>\n"
+    ) .
+    "        </div>\n" .
+    "    </td>\n" .
+    "</tr>";
                                             }
                                         } else {
                                             echo "<tr><td colspan='7' style='text-align: center; padding: 20px; color: #64748b;'>No users found</td></tr>";
@@ -1411,6 +1401,35 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
             }
         });
     };
+    </script>
+
+    <!-- Toggle archived users button logic -->
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const toggleBtn = document.getElementById('toggle-archived-btn');
+        if (!toggleBtn) return;
+
+        let showArchivedOnly = false;
+
+        toggleBtn.addEventListener('click', function() {
+            showArchivedOnly = !showArchivedOnly;
+
+            const rows = document.querySelectorAll('#userTable tbody tr');
+            rows.forEach(function(row) {
+                const statusCell = row.querySelector('td:nth-child(5) span');
+                const statusText = statusCell ? statusCell.textContent.trim() : '';
+                const isArchived = (statusText === 'Archived' || statusText === 'Inactive');
+
+                if (showArchivedOnly) {
+                    row.style.display = isArchived ? '' : 'none';
+                } else {
+                    row.style.display = '';
+                }
+            });
+
+            toggleBtn.textContent = showArchivedOnly ? 'Show All Users' : 'Show Archived Users';
+        });
+    });
     </script>
 
     <!-- Form submission handler -->

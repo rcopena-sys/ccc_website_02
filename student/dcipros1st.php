@@ -31,51 +31,6 @@ function checkIrregularStatus($conn, $studentId, $currentYear, $currentSem) {
     return false;
 }
 
-// Function to get curriculum courses for regular students
-function getCurriculumCourses($conn, $program = 'BSIT', $yearLevel = 1) {
-    $curriculumCourses = [
-        '1-1' => [],
-        '1-2' => []
-    ];
-    
-    // Connect to curriculum database
-    $curriculumConn = new mysqli("localhost", "root", "", "ccc_curriculum_evaluation");
-    if ($curriculumConn->connect_error) {
-        echo '<!-- Error connecting to curriculum DB: ' . $curriculumConn->connect_error . ' -->';
-        return $curriculumCourses;
-    }
-    
-    // Get curriculum courses for first year
-    $query = "SELECT course_code, course_title, lec_units, lab_units, total_units, prerequisites, year_semester 
-              FROM curriculum_bsit 
-              WHERE year_semester IN ('1-1', '1-2') 
-              ORDER BY year_semester, course_code";
-    
-    $result = $curriculumConn->query($query);
-    if ($result && $result->num_rows > 0) {
-        while ($row = $result->fetch_assoc()) {
-            $semesterKey = $row['year_semester'];
-            
-            $courseData = [
-                'course_code' => $row['course_code'] ?? '',
-                'course_title' => $row['course_title'] ?? '',
-                'lec_units' => $row['lec_units'] ?? 0,
-                'lab_units' => $row['lab_units'] ?? 0,
-                'total_units' => $row['total_units'] ?? 0,
-                'prerequisites' => $row['prerequisites'] ?? '',
-                'is_irregular' => false
-            ];
-            
-            if (isset($curriculumCourses[$semesterKey])) {
-                $curriculumCourses[$semesterKey][] = $courseData;
-            }
-        }
-    }
-    
-    $curriculumConn->close();
-    return $curriculumCourses;
-}
-
 // Function to get irregular courses for a student
 function getIrregularCourses($conn, $studentId, $year, $semester) {
     $irregularCourses = [];
@@ -139,48 +94,37 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['student_id'])) {
     header("Location: index.php");
     exit();
 }
-require_once 'db_connect.php';
+session_start();
+require_once __DIR__ . '/../db_connect.php';
 
 // Initialize student data
 $student_id = $_SESSION['student_id'];
 
-// Initialize grades array
-$gradesByCode = [];
+// Check if student is irregular for either semester
+$isIrregular = checkIrregularStatus($conn, $student_id, 1, 1) || checkIrregularStatus($conn, $student_id, 1, 2);
 
-// Get grades for this student from grades_db
-if (!empty($student_id)) {
-    $gradesQuery = "SELECT * FROM grades_db WHERE student_id = ?";
-    $gradesStmt = $conn->prepare($gradesQuery);
-    if ($gradesStmt) {
-        $gradesStmt->bind_param("s", $student_id);
-        $gradesStmt->execute();
-        $gradesResult = $gradesStmt->get_result();
-        while ($gradeRow = $gradesResult->fetch_assoc()) {
-            // Try different possible column names for subject/course code
-            $subjectCode = '';
-            if (isset($gradeRow['course_code'])) {
-                $subjectCode = $gradeRow['course_code'];
-            } elseif (isset($gradeRow['subject_code'])) {
-                $subjectCode = $gradeRow['subject_code'];
-            } elseif (isset($gradeRow['subject'])) {
-                $subjectCode = $gradeRow['subject'];
-            }
-            
-            $subjectCode = strtoupper(trim($subjectCode));
-            if (!empty($subjectCode)) {
-                $gradesByCode[$subjectCode] = [
-                    'grade' => $gradeRow['final_grade'] ?? '',
-                    'remarks' => '',
-                    'course_title' => '',
-                    'units' => 0
-                ];
-            }
+// Get irregular courses if any
+$irregularCourses = [];
+if ($isIrregular) {
+    $irregularCourses = array_merge(
+        getIrregularCourses($conn, $student_id, 1, 1),
+        getIrregularCourses($conn, $student_id, 1, 2)
+    );
+    
+    // Add irregular courses to gradesByCode for display
+    foreach ($irregularCourses as $course) {
+        $courseCode = strtoupper(trim($course['course_code']));
+        if (!isset($gradesByCode[$courseCode])) {
+            $gradesByCode[$courseCode] = [
+                'grade' => $course['grade'] ?? 'N/A',
+                'remarks' => 'Irregular',
+                'course_title' => $course['course_title'],
+                'year' => 1,
+                'sem' => $course['semester'] ?? 1
+            ];
         }
-        $gradesStmt->close();
     }
 }
-
-// Get student information first
 $stmt = $conn->prepare("SELECT firstname, lastname, student_id, course, classification, profile_image FROM signin_db WHERE student_id = ?");
 $stmt->bind_param("s", $student_id);
 $stmt->execute();
@@ -188,51 +132,43 @@ $result = $stmt->get_result();
 $student = $result->fetch_assoc();
 $stmt->close();
 
-// Load courses based on student classification
-$courses = [];
-$studentClassification = strtolower($student['classification'] ?? 'regular');
-
-echo '<!-- Debug: Student classification: ' . htmlspecialchars($studentClassification) . ' -->';
-
-if ($studentClassification === 'irregular') {
-    // Load irregular courses for irregular students
-    echo '<!-- Loading irregular courses -->';
-    $irregularCourses = array_merge(
-        getIrregularCourses($conn, $student_id, 1, 1),
-        getIrregularCourses($conn, $student_id, 1, 2)
-    );
-    
-    // Organize irregular courses by semester
-    $courses = [
-        '1-1' => [],
-        '1-2' => []
-    ];
-    
-    foreach ($irregularCourses as $course) {
-        $semesterKey = '1-' . ($course['semester'] ?? 1);
-        if (isset($courses[$semesterKey])) {
-            $courses[$semesterKey][] = $course;
-        }
-        
-        // Add irregular courses to gradesByCode for display
-        $courseCode = strtoupper(trim($course['course_code']));
-        if (!isset($gradesByCode[$courseCode])) {
-            $gradesByCode[$courseCode] = [
-                'grade' => $course['grade'] ?? 'N/A',
-                'remarks' => 'Irregular',
-                'course_title' => $course['course_title'],
-                'units' => $course['units'] ?? 0
-            ];
-        }
-    }
-} else {
-    // Load curriculum courses for regular students
-    echo '<!-- Loading curriculum courses for regular student -->';
-    $courses = getCurriculumCourses($conn, 'BSIT', 1);
-}
-
 // Initialize total units
 $totalUnits = 0;
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['student_id'])) {
+    header("Location: index.php");
+    exit();
+}
+
+// Initialize grades array
+$gradesByCode = [];
+
+// Get grades for this student from grades_db
+if (!empty($student_id)) {
+    try {
+        // Check if grades table exists
+        $tableCheck = $conn->query("SHOW TABLES LIKE 'grades_db'");
+        if ($tableCheck->num_rows > 0) {
+            $gradeStmt = $conn->prepare("SELECT * FROM grades_db WHERE student_id = ?");
+            $gradeStmt->bind_param("s", $student_id);
+            $gradeStmt->execute();
+            $gradeResult = $gradeStmt->get_result();
+            
+            while ($grade = $gradeResult->fetch_assoc()) {
+                $courseCode = trim(strtoupper($grade['course_code']));
+                $gradesByCode[$courseCode] = [
+                    'grade' => $grade['final_grade'] ?? 'N/A',
+                    'remarks' => $grade['remarks'] ?? 'N/A',
+                    'course_title' => $grade['course_title'] ?? '',
+                    'year' => $grade['year'] ?? '',
+                    'sem' => $grade['sem'] ?? ''
+                ];
+            }
+            $gradeStmt->close();
+        }
+    } catch (Exception $e) {
+        error_log("Error fetching grades: " . $e->getMessage());
+    }
+}
 
 // Debug output
 echo '<!-- Debug: Current session student_id: ' . htmlspecialchars($student_id) . ' -->';
@@ -512,7 +448,7 @@ function calculateYearlyUnits($courses) {
                 color: white !important;
                 text-align: center !important;
                 padding-left: 1400px !important;
-                max-width: 1716px !important;
+                max-width: 1500px !important;
                 margin-left: auto !important;
                 margin-right: 0 !important;
                 padding-right: 20px !important;
@@ -743,7 +679,7 @@ function calculateYearlyUnits($courses) {
             color: white;
             padding: 8px;
             margin-bottom: 0;
-            max-width: 2081px;
+            max-width: 1516px;
             margin-left: auto;
             margin-right: 0;
             padding-right: 20px;
@@ -1047,7 +983,7 @@ function calculateYearlyUnits($courses) {
                     <i class="bi bi-book"></i> Fourth Year
                 </a>
             </li>
-            <li class="nav-item mb-2">
+              <li class="nav-item mb-2">
                 <a href="print_prospectus.php" class="nav-link text-white">
                     <i class="bi bi-printer"></i> Print Prospectus
                 </a>
@@ -1082,7 +1018,7 @@ function calculateYearlyUnits($courses) {
                     <div class="barcode-container d-inline-block">
                         <svg id="barcode" style="display: block; margin: 0 auto;"></svg>
                         <div class="barcode-text small mt-1">ID: <?php echo htmlspecialchars($student['student_id']); ?></div>
-                        <div class="prospectus-title fw-bold">PROSPECTUS</div>
+                        <div class="prospectus-title fw-bold">STUDY LOAD</div>
                     </div>
                     <script>
                         // Initialize barcode with student ID
@@ -1136,16 +1072,17 @@ function calculateYearlyUnits($courses) {
             </div>
         
         <?php
-        // Database connection for curriculum
-        $host = "localhost";
-        $user = "root";
-        $pass = "";
-        $db = "ccc_curriculum_evaluation";
+      session_start();
+$servername = "localhost";
+$username = "u220649928_public_html";
+$password = "RoZz_puGeCivic96Vti";
+$dbname = "u220649928_ccc_curriculum";
 
-        $conn = new mysqli($host, $user, $pass, $db);
-        if ($conn->connect_error) {
-            die("Connection failed: " . $conn->connect_error);
-        }
+$conn = new mysqli($servername, $username, $password, $dbname);
+
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+}
         
         // Debug: Show database being used
         echo '<!-- Using database: ' . $db . ' -->';
@@ -1760,8 +1697,8 @@ foreach ($courses['1-2'] as $course) {
         
         echo 'Total Subjects (year): ' . $totalSubjects . '<br/>';
         echo '</div>';
-
-  // Check if student has any irregular courses
+        
+ // Check if student has any irregular courses
 $hasIrregularCourses = false;
 if (!empty($student_id)) {
     $checkIrregular = $conn->prepare("
@@ -1792,93 +1729,6 @@ if ($hasIrregularCourses) {
     echo '<div style="margin-top:2px;font-size:9px;">PROGRAM DIRECTOR</div>';
     echo '</div>';
 }
-
-
-        
-        // Check for e-signature from signin_db for BSIT students in irregular_db with year_semester 1-1
-        $student_id = $studentData['student_id'] ?? '';
-        $signature_displayed = false;
-        
-        // Debug: Show what we're looking for
-        echo '<!-- DEBUG: Student ID: ' . htmlspecialchars($student_id) . ' -->';
-        
-        if (!empty($student_id)) {
-            // First check if student is in irregular_db with year_semester 1-1 and course BSIT
-            $irregularQuery = "SELECT course FROM irregular_db 
-                              WHERE student_id = ? AND year_semester = '1-1' AND course = 'BSIT' 
-                              LIMIT 1";
-            $irregularStmt = $conn->prepare($irregularQuery);
-            if ($irregularStmt) {
-                $irregularStmt->bind_param('s', $student_id);
-                $irregularStmt->execute();
-                $irregularResult = $irregularStmt->get_result();
-                
-                echo '<!-- DEBUG: Irregular DB result count: ' . ($irregularResult ? $irregularResult->num_rows : 'null') . ' -->';
-                
-                if ($irregularResult && $irregularResult->num_rows > 0) {
-                    echo '<!-- DEBUG: Student qualifies for signature -->';
-                    // Student qualifies - get their e-signature from signin_db
-                    $sigQuery = "SELECT esignature FROM signin_db WHERE id = ?";
-                    $sigStmt = $conn->prepare($sigQuery);
-                    if ($sigStmt) {
-                        // Get user ID from student_id
-                        $userQuery = "SELECT id FROM signin_db WHERE student_id = ? LIMIT 1";
-                        $userStmt = $conn->prepare($userQuery);
-                        $userStmt->bind_param('s', $student_id);
-                        $userStmt->execute();
-                        $userResult = $userStmt->get_result();
-                        
-                        if ($userResult && $userResult->num_rows > 0) {
-                            $userRow = $userResult->fetch_assoc();
-                            $user_id = $userRow['id'];
-                            
-                            echo '<!-- DEBUG: Found user ID: ' . $user_id . ' -->';
-                            
-                            $sigStmt->bind_param('i', $user_id);
-                            $sigStmt->execute();
-                            $sigResult = $sigStmt->get_result();
-                            
-                            if ($sigResult && $sigResult->num_rows > 0) {
-                                $sigRow = $sigResult->fetch_assoc();
-                                $signature_file = $sigRow['esignature'];
-                                
-                                echo '<!-- DEBUG: Signature file: ' . htmlspecialchars($signature_file ?: 'NULL') . ' -->';
-                                
-                                if (!empty($signature_file) && file_exists("../adminpage/uploads/esignatures/" . $signature_file)) {
-                                    echo '<div style="margin-top:5px;">';
-                                    echo '<img src="../adminpage/uploads/esignatures/' . htmlspecialchars($signature_file) . 
-                                         '" alt="Program Director Signature" style="max-height:40px;max-width:150px;border:1px solid #ccc;">';
-                                    echo '</div>';
-                                    $signature_displayed = true;
-                                    echo '<!-- DEBUG: Signature displayed successfully -->';
-                                } else {
-                                    echo '<!-- DEBUG: Signature file not found or empty -->';
-                                }
-                            } else {
-                                echo '<!-- DEBUG: No signature found in signin_db -->';
-                            }
-                        } else {
-                            echo '<!-- DEBUG: User not found in signin_db -->';
-                        }
-                        $userStmt->close();
-                    }
-                    $sigStmt->close();
-                } else {
-                    echo '<!-- DEBUG: Student not found in irregular_db with year_semester 1-1 and course BSIT -->';
-                }
-                $irregularStmt->close();
-            }
-        } else {
-            echo '<!-- DEBUG: No student ID provided -->';
-        }
-        
-        // Only show "PROGRAM DIRECTOR" text if no signature was displayed
-        if (!$signature_displayed) {
-            echo '<div style="margin-top:2px;font-size:9px;">';
-            echo 'PROGRAM DIRECTOR';
-            echo '</div>';
-        }
-        echo '</div>';
 
         // Close database connection
         $conn->close();

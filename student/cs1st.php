@@ -94,7 +94,8 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['student_id'])) {
     header("Location: index.php");
     exit();
 }
-require_once 'db_connect.php';
+session_start();
+require_once __DIR__ . '/../db_connect.php';
 
 // Initialize student data
 $student_id = $_SESSION['student_id'];
@@ -982,7 +983,7 @@ function calculateYearlyUnits($courses) {
                     <i class="bi bi-book"></i> Fourth Year
                 </a>
             </li>
-            <li class="nav-item mb-2">
+              <li class="nav-item mb-2">
                 <a href="print_prospectus.php" class="nav-link text-white">
                     <i class="bi bi-printer"></i> Print Prospectus
                 </a>
@@ -1071,15 +1072,17 @@ function calculateYearlyUnits($courses) {
         
         <?php
         // Database connection for curriculum
-        $host = "localhost";
-        $user = "root";
-        $pass = "";
-        $db = "ccc_curriculum_evaluation";
+      session_start();
+$servername = "localhost";
+$username = "u220649928_public_html";
+$password = "RoZz_puGeCivic96Vti";
+$dbname = "u220649928_ccc_curriculum";
 
-        $conn = new mysqli($host, $user, $pass, $db);
-        if ($conn->connect_error) {
-            die("Connection failed: " . $conn->connect_error);
-        }
+$conn = new mysqli($servername, $username, $password, $dbname);
+
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+}
         
         // Debug: Show database being used
         echo '<!-- Using database: ' . $db . ' -->';
@@ -1695,15 +1698,37 @@ foreach ($courses['1-2'] as $course) {
         echo 'Total Subjects (year): ' . $totalSubjects . '<br/>';
         echo '</div>';
 
-        // Add Program Director section
-        echo '<div class="program-director-section" style="margin-top:5px;text-align:center;page-break-inside:avoid;">';
-        echo '<div style="margin-top:2px;">';
-        echo '______________________________________';
-        echo '</div>';
-        echo '<div style="margin-top:2px;font-size:9px;">';
-        echo 'PROGRAM DIRECTOR';
-        echo '</div>';
-        echo '</div>';
+ // Check if student has any irregular courses
+$hasIrregularCourses = false;
+if (!empty($student_id)) {
+    $checkIrregular = $conn->prepare("
+        SELECT COUNT(*) as count 
+        FROM irregular_db 
+        WHERE student_id = ? 
+        AND year_semester IN ('1-1', '1-2')
+    ");
+    if ($checkIrregular) {
+        $checkIrregular->bind_param("s", $student_id);
+        $checkIrregular->execute();
+        $result = $checkIrregular->get_result();
+        $row = $result->fetch_assoc();
+        $hasIrregularCourses = ($row && $row['count'] > 0);
+        $checkIrregular->close();
+    }
+}
+
+// Only show signature if student has irregular courses
+if ($hasIrregularCourses) {
+    echo '<div class="program-director-section" style="margin-top:5px;text-align:center;page-break-inside:avoid;">';
+    echo '<div style="margin-top:2px;">';
+    echo '</div>';
+    echo '<div style="text-align: center; margin: 20px 0;">';
+    echo '<img src="signature.png" alt="Signature" style="max-width: 200px; height: auto; display: block; margin: 0 auto;">';
+    echo '______________________________________';
+    echo '</div>';
+    echo '<div style="margin-top:2px;font-size:9px;">PROGRAM DIRECTOR</div>';
+    echo '</div>';
+}
 
         // Close database connection
         $conn->close();

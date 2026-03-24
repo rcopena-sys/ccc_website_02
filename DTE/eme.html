@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>BSIT Curriculum</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="flex h-screen bg-gray-100">
+
+  <!-- Sidebar -->
+  <aside class="w-64 bg-blue-600 text-white p-6 flex flex-col">
+    <div class="flex flex-col items-center">
+        <img src="arlou.jpeg.png" class="rounded-full border-4 border-white w-24 h-24 object-cover" alt="Dean Profile" />
+        <h2 class="mt-4 font-semibold text-lg">Arlou H. Fernando</h2>
+        <p class="text-sm text-gray-200 mb-6">Dean</p>
+    </div>
+    <nav class="space-y-4 mt-4">
+        <a href="dashboard2.php" class="block py-2 px-4 rounded hover:bg-blue-500">Dashboard</a>
+        <a href="Dean.php" class="block py-2 px-4 rounded hover:bg-blue-500">Student</a>
+        <a href="#" class="block py-2 px-4 rounded bg-blue-500">Curriculum</a>
+    </nav>
+    <div class="mt-auto">
+        <a href="index.php" class="block py-2 px-4 bg-red-500 text-white rounded hover:bg-red-600 text-center">Logout</a>
+    </div>
+</aside>
+
+  <!-- Main Content -->
+  <main class="flex-1 overflow-y-scroll p-8 space-y-12">
+    <h2 class="text-3xl font-bold mb-4">BSIT Curriculum (Prospectus 2022)</h2>
+
+    <!-- Section per semester -->
+    <section class="space-y-10">
+
+      <!-- Include each year level -->
+      <!-- Load partials for each year/semester below -->
+
+      <!-- FIRST YEAR - BOTH SEMESTERS -->
+      <!-- Include from previous message -->
+      <!-- SECOND YEAR - FIRST SEMESTER -->
+      <div>
+        <h3 class="text-xl font-semibold mb-2">First year - First Semester</h3>
+        <table class="w-full bg-white border">
+          <thead class="bg-blue-800 text-white">
+            <tr>
+              <th class="p-2 border">Code</th>
+              <th class="p-2 border">Course Title</th>
+              <th class="p-2 border">Lec</th>
+              <th class="p-2 border">Lab</th>
+              <th class="p-2 border">Units</th>
+              <th class="p-2 border">Pre-Req</th>
+            </tr>
+          </thead>
+          <tbody class="text-center">
+            <tr class="border"><td>IT 101</td><td class="text-left p-2">Introduction to Computing with Laboratory</td><td>2</td><td>3</td><td>3</td><td>-</td></tr>
+            <tr class="border"><td>CS 101</td><td class="text-left p-2">Fundamentals of Programming with Laboratory</td><td>2</td><td>3</td><td>3</td><td>-</td></tr>
+            <tr class="border"><td>MATH 101</td><td class="text-left p-2">Mathematics in the Modern World</td><td>3</td><td>0</td><td>3</td><td>-</td></tr>
+            <tr class="border"><td>US 101</td><td class="text-left p-2">Understanding the Self</td><td>3</td><td>0</td><td>3</td><td>-</td></tr>
+            <tr class="border"><td>IE 101</td><td class="text-left p-2">Interactive English</td><td>3</td><td>0</td><td>3</td><td>-</td></tr>
+            <tr class="border"><td>SEC 101</td><td class="text-left p-2">Security Awareness</td><td>3</td><td>0</td><td>3</td><td>-</td></tr>
+            <tr class="border"><td>ALG 101</td><td class="text-left p-2">Linear Algebra</td><td>3</td><td>0</td><td>3</td><td>-</td></tr>
+            <tr class="border"><td>PE 101</td><td class="text-left p-2">Physical Fitness, Gymnastics and Aerobics</td><td>2</td><td>0</td><td>2</td><td>-</td></tr>
+            <tr class="border"><td>NSTP 101</td><td class="text-left p-2">National Service Training Program 1</td><td>3</td><td>0</td><td>3</td><td>-</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- SECOND YEAR - SECOND SEMESTER -->
+      <div>
+        <h3 class="text-xl font-semibold mb-2">First Year - Second Semester</h3>
+        <table class="w-full bg-white border">
+          <thead class="bg-blue-800 text-white">
+            <tr>
+              <th class="p-2 border">Code</th>
+              <th class="p-2 border">Course Title</th>
+              <th class="p-2 border">Lec</th>
+              <th class="p-2 border">Lab</th>
+              <th class="p-2 border">Units</th>
+              <th class="p-2 border">Pre-Req</th>
+            </tr>
+          </thead>
+          <tbody class="text-center">
+            <tr class="border"><td>CS 102</td><td class="text-left p-2">Oriented Programming</td><td>2</td><td>3</td><td>3</td><td>CS101</td></tr>
+            <tr class="border"><td>IT 102</td><td class="text-left p-2">Information Management</td><td>3</td><td>-</td><td>3</td><td>IT101</td></tr>
+            <tr class="border"><td>NET 102</td><td class="text-left p-2">Computer Networking 1</td><td>2</td><td>3</td><td>3</td><td>IT101</td></tr>
+            <tr class="border"><td>IT 201</td><td class="text-left p-2">Data Structures and Algorithms with laboratory</td><td>2</td><td>3</td><td>3</td><td>CS 101</td></tr>
+            <tr class="border"><td>PCOM 102</td><td class="text-left p-2">Purposive Communication</td><td>3</td><td>-</td><td>3</td><td>IE101</td></tr>
+            <tr class="border"><td>IT 231</td><td class="text-left p-2">Computer Networking 3</td><td>2</td><td>3</td><td>3</td><td>IT101, CS101</td></tr>
+            <tr class="border"><td>CALC 102</td><td class="text-left p-2">Mechanics</td><td>3</td><td>-</td><td>3</td><td>Math101</td></tr>
+            <tr class="border"><td>PE 102</td><td class="text-left p-2">Team Sports</td><td>2</td><td>-</td><td>2</td><td>PATHfit 1</td></tr>
+            <tr class="border"><td>NSTP 102</td><td class="text-left p-2">Team Sports</td><td>3</td><td>-</td><td>3</td><td>NSTP101</td></tr>
+        </tbody>
+        </table>
+      </div>
+
+      <div>
+      <h3 class="text-xl font-semibold mb-2">Second Year - 1st Semester</h3>
+      <table class="w-full bg-white border">
+        <thead class="bg-blue-800 text-white">
+          <tr>
+            <th class="p-2 border">Code</th>
+            <th class="p-2 border">Course Title</th>
+            <th class="p-2 border">Lec</th>
+            <th class="p-2 border">Lab</th>
+            <th class="p-2 border">Units</th>
+            <th class="p-2 border">Pre-Req</th>
+          </tr>
+        </thead>
+        <tbody class="text-center">
+            <tr class="border"><td>DIS 201</td><td class="text-left p-2">Discrete Mathematics</td><td>3</td><td>0</td><td>3</td><td>CALC102</td></tr>
+            <tr class="border"><td>IT 211</td><td class="text-left p-2">Database Management System</td><td>2</td><td>3</td><td>3</td><td>IT102</td></tr>
+            <tr class="border"><td>RPH 201</td><td class="text-left p-2">Readings in Philippine History</td><td>3</td><td>0</td><td>3</td><td>-</td></tr>
+            <tr class="border"><td>ENV 201</td><td class="text-left p-2">Environmental Science</td><td>3</td><td>0</td><td>3</td><td>-</td></tr>
+            <tr class="border"><td>IT 221</td><td class="text-left p-2">Web Design and Programming</td><td>2</td><td>3</td><td>3</td><td>CS102</td></tr>
+            <tr class="border"><td>NET 201</td><td class="text-left p-2">Computer Networking 2</td><td>2</td><td>3</td><td>3</td><td>NET102</td></tr>
+            <tr class="border"><td>RIZAL 201</td><td class="text-left p-2">The Life and Works of Rizal</td><td>3</td><td>0</td><td>3</td><td>-</td></tr>
+            <tr class="border"><td>ACCTG 201</td><td class="text-left p-2">Accounting</td><td>3</td><td>0</td><td>3</td><td>-</td></tr>
+            <tr class="border"><td>PE 201</td><td class="text-left p-2">Individual/Dual Sports</td><td>2</td><td>0</td><td>2</td><td>PATHFit 1</td></tr>
+          </tbody>
+      </table>
+    </div>
+
+    <div>
+        <h3 class="text-xl font-semibold mb-2">Second Year - 2nd Semester</h3>
+        <table class="w-full bg-white border">
+          <thead class="bg-blue-800 text-white">
+            <tr>
+              <th class="p-2 border">Code</th>
+              <th class="p-2 border">Course Title</th>
+              <th class="p-2 border">Lec</th>
+              <th class="p-2 border">Lab</th>
+              <th class="p-2 border">Units</th>
+              <th class="p-2 border">Pre-Req</th>
+            </tr>
+          </thead>
+          <tbody class="text-center">
+            <tr class="border"><td>IAS 202</td><td class="text-left p-2">Information Assurance & Security 1</td><td>3</td><td>0</td><td>3</td><td>NET201</td></tr>
+            <tr class="border"><td>SAM 202</td><td class="text-left p-2">System Administration and Maintenance</td><td>2</td><td>3</td><td>3</td><td>NET201</td></tr>
+            <tr class="border"><td>CS 333</td><td class="text-left p-2">Application Development & Emerging Technologies</td><td>3</td><td>0</td><td>3</td><td>IT211, IT221</td></tr>
+            <tr class="border"><td>LDS 202</td><td class="text-left p-2">Logic Design and Switching</td><td>2</td><td>3</td><td>3</td><td>NET201</td></tr>
+            <tr class="border"><td>IT 202</td><td class="text-left p-2">Software Engineering 1</td><td>3</td><td>0</td><td>3</td><td>IT211, IT221</td></tr>
+            <tr class="border"><td>NET 202</td><td class="text-left p-2">Computer Networking 3</td><td>2</td><td>3</td><td>3</td><td>NET201</td></tr>
+            <tr class="border"><td>HCI 302</td><td class="text-left p-2">Human Computer Interaction</td><td>3</td><td>0</td><td>3</td><td>IT211</td></tr>
+            <tr class="border"><td>PE 202</td><td class="text-left p-2">Team Sports</td><td>2</td><td>0</td><td>2</td><td>PATHFit 1</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <h3 class="text-xl font-semibold mb-2">Third Year - 1st Semester</h3>
+        <table class="w-full bg-white border">
+          <thead class="bg-blue-800 text-white">
+            <tr>
+              <th class="p-2 border">Code</th>
+              <th class="p-2 border">Course Title</th>
+              <th class="p-2 border">Lec</th>
+              <th class="p-2 border">Lab</th>
+              <th class="p-2 border">Units</th>
+              <th class="p-2 border">Pre-Req</th>
+            </tr>
+          </thead>
+          <tbody class="text-center">
+            <tr class="border"><td>IAS 301</td><td class="text-left p-2">Advanced Information Assurance & Security</td><td>3</td><td>0</td><td>3</td><td>IAS202</td></tr>
+            <tr class="border"><td>SIA 301</td><td class="text-left p-2">System Integration and Architecture</td><td>3</td><td>0</td><td>3</td><td>SAM202</td></tr>
+            <tr class="border"><td>IT 301</td><td class="text-left p-2">Software Engineering 2</td><td>3</td><td>0</td><td>3</td><td>IT202</td></tr>
+            <tr class="border"><td>NET 301</td><td class="text-left p-2">Computer Networking 4</td><td>2</td><td>3</td><td>3</td><td>NET202</td></tr>
+            <tr class="border"><td>CEEL 301</td><td class="text-left p-2">Graphics Design</td><td>2</td><td>3</td><td>3</td><td>-</td></tr>
+            <tr class="border"><td>SQA 302</td><td class="text-left p-2">Software Quality Assurance</td><td>3</td><td>0</td><td>3</td><td>IT202</td></tr>
+            <tr class="border"><td>ETHICS 301</td><td class="text-left p-2">Professional Ethics</td><td>3</td><td>0</td><td>3</td><td>-</td></tr>
+            <tr class="border"><td>TECH 301</td><td class="text-left p-2">Technopreneurship</td><td>3</td><td>0</td><td>3</td><td>-</td></tr>
+          </tbody>
+        </table>
+      </div>
+     
+      <div>
+        <h3 class="text-xl font-semibold mb-2">Third Year - 2nd Semester</h3>
+        <table class="w-full bg-white border">
+          <thead class="bg-blue-800 text-white">
+            <tr>
+              <th class="p-2 border">Code</th>
+              <th class="p-2 border">Course Title</th>
+              <th class="p-2 border">Lec</th>
+              <th class="p-2 border">Lab</th>
+              <th class="p-2 border">Units</th>
+              <th class="p-2 border">Pre-Req</th>
+            </tr>
+          </thead>
+          <tbody class="text-center">
+            <tr class="border"><td>CEEL 311</td><td class="text-left p-2">Mobile Application Development</td><td>3</td><td>0</td><td>3</td><td>-</td></tr>
+            <tr class="border"><td>CEEL 302</td><td class="text-left p-2">Multimedia</td><td>2</td><td>3</td><td>3</td><td>-</td></tr>
+            <tr class="border"><td>CEEL 312</td><td class="text-left p-2">Cloud Computing</td><td>3</td><td>0</td><td>3</td><td>-</td></tr>
+            <tr class="border"><td>CAP 302</td><td class="text-left p-2">Capstone Project 1</td><td>3</td><td>0</td><td>3</td><td>-</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+
+
+      <div>
+        <h3 class="text-xl font-semibold mb-2">Fourth Year - 1st Semester</h3>
+        <table class="w-full bg-white border">
+          <thead class="bg-blue-800 text-white">
+            <tr>
+              <th class="p-2 border">Code</th>
+              <th class="p-2 border">Course Title</th>
+              <th class="p-2 border">Lec</th>
+              <th class="p-2 border">Lab</th>
+              <th class="p-2 border">Units</th>
+              <th class="p-2 border">Pre-Req</th>
+            </tr>
+          </thead>
+          <tbody class="text-center">
+            <tr class="border"><td>CAP 401</td><td class="text-left p-2">Capstone Project 2</td><td>3</td><td>0</td><td>3</td><td>Requires Approval</td></tr>
+            <tr class="border"><td>GCE 401</td><td class="text-left p-2">Glocal Citizenship Education</td><td>1</td><td>0</td><td>1</td><td>-</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+
+<div>
+<h3 class="text-xl font-semibold mb-2">Fourth Year - 2nd Semester</h3>
+<table class="w-full bg-white border">
+  <thead class="bg-blue-800 text-white">
+    <tr>
+      <th class="p-2 border">Code</th>
+      <th class="p-2 border">Course Title</th>
+      <th class="p-2 border">Lec</th>
+      <th class="p-2 border">Lab</th>
+      <th class="p-2 border">Units</th>
+      <th class="p-2 border">Pre-Req</th>
+    </tr>
+  </thead>
+  <tbody class="text-center">
+    <tr class="border"><td>PRAC 402</td><td class="text-left p-2">IT Internship (600 Hours)</td><td>0</td><td>6</td><td>6</td><td>Requires Approval</td></tr>
+  </tbody>
+</table>
+</div>
+</main>
+</div>
+      <!-- THIRD YEAR and FOURTH YEAR Placeholder -->
+      <!-- You can provide those subjects or I can generate realistic dummy content if image is not yet uploaded -->
+
+    </section>
+  </main>
+
+</body>
+</html>

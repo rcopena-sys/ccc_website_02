@@ -1,7 +1,6 @@
 <?php
-// Database connection
-require_once 'config.php';
-
+session_start();
+require_once __DIR__ . '/../db_connect.php';
 // Initialize variables
 $student_id = '';
 $student_info = null;

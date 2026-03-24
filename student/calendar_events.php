@@ -4,7 +4,7 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['student_id'])) {
     header("Location: index.php");
     exit();
 }
-require_once 'db_connect.php';
+require_once __DIR__ . '/../db_connect.php';
 
 // Initialize student data
 $student = [
@@ -903,7 +903,7 @@ if ($result->num_rows > 0) {
           <div class="d-grid gap-3 w-100 mt-4 px-2">
     <a href="calendar_events.php" class="btn btn-outline-light fw-semibold sidebar-link">Calendar Events</a>
     <a href="feedback.php" class="btn btn-outline-light fw-semibold sidebar-link">Feedback</a>
-    <a href="logout.php" class="btn btn-danger fw-bold sidebar-link mt-2">Logout</a>
+    
 </div>
     </div>
 </div>

@@ -25,6 +25,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($label === '' || !$start_date || !$end_date) {
             $error = 'Please provide a fiscal year label, start date and end date.';
+        } elseif (!preg_match('/^\\d{4}-\\d{4}$/', $label)) {
+            $error = 'Fiscal year label must be in the format YYYY-YYYY (e.g. 2022-2023).';
+        } elseif ($start_date === $end_date) {
+            $error = 'Start date and end date cannot be the same day.';
         } else {
             try {
                 // if marking active, clear previous active

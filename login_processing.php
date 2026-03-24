@@ -49,9 +49,13 @@ if (empty($password)) {
 }
 
 // Check if account exists and get current status
-$stmt = $conn->prepare("SELECT id, firstname, lastname, email, password, student_id, academic_year, course, role_id, status, 
-                        failed_attempts, last_failed_attempt, account_locked_until 
-                        FROM signin_db WHERE email = ?");
+$stmt = $conn->prepare("SELECT s.id, s.firstname, s.lastname, s.email, s.password, s.student_id, s.academic_year, s.course, 
+                        s.role_id, s.department_id, s.status, s.failed_attempts, s.last_failed_attempt, s.account_locked_until, 
+                        r.role_name, d.code AS dept_code 
+                        FROM signin_db s 
+                        LEFT JOIN roles r ON s.role_id = r.role_id 
+                        LEFT JOIN departments d ON s.department_id = d.id 
+                        WHERE s.email = ?");
 $stmt->bind_param("s", $email);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -182,6 +186,8 @@ $_SESSION['email'] = $user['email'];
 $_SESSION['student_id'] = $user['student_id'];
 $_SESSION['academic_year'] = $user['academic_year'];
 $_SESSION['course'] = $user['course'];
+$_SESSION['department_id'] = $user['department_id'] ?? null;
+$_SESSION['department_code'] = $user['dept_code'] ?? null;
 $_SESSION['session_id'] = $session_id;
 
 // Set secure cookie for remember me (only if using HTTPS set secure=true)
@@ -201,16 +207,60 @@ try {
     error_log("Activity log failed: " . $e->getMessage());
 }
 
-// Redirect by role
-switch ((int)$user['role_id']) {
-    case 1: header("Location: super admin/homepage.php"); break;
-    case 2: header("Location: adminpage/dashboard2.php"); break;
-    case 3: header("Location: registrar/dashboardr.php"); break;
-    case 4: header("Location: student/dci_page.php"); break;
-    case 5: header("Location: student/cs_studash.php"); break;
+// Redirect by role / role name
+$roleId = (int)$user['role_id'];
+$roleName = trim($user['role_name'] ?? '');
+$deptCode = trim($user['dept_code'] ?? '');
+
+// Dean: redirect to department-specific dashboard
+if ($roleName === 'Dean') {
+    switch ($deptCode) {
+        case 'DBA':
+            header("Location: DBA/dashboard.php");
+            break;
+        case 'DCI':
+            header("Location: DCI/dashboard.php");
+            break;
+        case 'DTE':
+            header("Location: DTE/dashboard.php");
+            break;
+        case 'DAS':
+            header("Location: DAS/dashboard.php");
+            break;
+        default:
+            // Fallback if department not set
+            header("Location: adminpage/dashboard2.php");
+            break;
+    }
+    exit();
+}
+
+// Staff and Program Head share the same dashboard
+if (in_array($roleName, ['Staff', 'Program Head'], true)) {
+    header("Location: adminpage/dashboard2.php");
+    exit();
+}
+
+switch ($roleId) {
+    case 1:
+        header("Location: super_admin/homepage.php");
+        break;
+    case 2:
+        header("Location: adminpage/dashboard2.php");
+        break;
+    case 3:
+        header("Location: registrar/dashboardr.php");
+        break;
+    case 4:
+        header("Location: student/dci_page.php");
+        break;
+    case 5:
+        header("Location: student/cs_studash.php");
+        break;
     default:
         $_SESSION['toast_error'] = "Invalid user role. Please contact administrator.";
-        header("Location: index.php"); exit();
+        header("Location: index.php");
+        exit();
 }
 exit();
 

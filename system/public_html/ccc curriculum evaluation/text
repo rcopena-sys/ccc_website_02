@@ -1,0 +1,46 @@
+<?php
+// create_account.php (or whatever you name this file)
+
+// Database connection details (replace with your actual credentials)
+$host = "localhost";
+$dbname = "your_database_name";
+$username = "your_username";
+$password = "your_password";
+
+try {
+    // Create a PDO connection
+    $conn = new PDO("mysql:host=$host;dbname=$dbname", $username, $password);
+    $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+    // Check if the form is submitted
+    if ($_SERVER["REQUEST_METHOD"] == "POST") {
+        // Sanitize and retrieve form data
+        $surname = htmlspecialchars(trim($_POST["surname"]));
+        $firstname = htmlspecialchars(trim($_POST["firstname"]));
+        $email = htmlspecialchars(trim($_POST["email"]));
+        $password = password_hash($_POST["password"], PASSWORD_DEFAULT); // Hash the password
+        $user_type = htmlspecialchars(trim($_POST["user_type"]));
+
+        // Validate form data (add more robust validation as needed)
+        if (empty($surname) || empty($firstname) || empty($email) || empty($_POST["password"]) || empty($user_type)) {
+            echo "All fields are required.";
+        } else {
+            // Prepare and execute the SQL query
+            $stmt = $conn->prepare("INSERT INTO users (surname, firstname, email, password, user_type) VALUES (:surname, :firstname, :email, :password, :user_type)");
+            $stmt->bindParam(':surname', $surname);
+            $stmt->bindParam(':firstname', $firstname);
+            $stmt->bindParam(':email', $email);
+            $stmt->bindParam(':password', $password);
+            $stmt->bindParam(':user_type', $user_type);
+
+            $stmt->execute();
+
+            echo "Account created successfully!";
+            header("Location: ccc_login.html"); // Redirect to login page
+            exit();
+        }
+    }
+} catch (PDOException $e) {
+    echo "Error: " . $e->getMessage();
+}
+?>

@@ -470,18 +470,7 @@
             }
         </style>
         <?php
-       include 'db.php';
-
-// Debug: Check current database and tables
-echo "<!-- Current database: " . $conn->query("SELECT DATABASE()")->fetch_row()[0] . " -->";
-$tables_query = "SHOW TABLES";
-$tables_result = $conn->query($tables_query);
-if ($tables_result) {
-    echo "<!-- Available tables: -->";
-    while ($table = $tables_result->fetch_array()) {
-        echo "<!-- - " . $table[0] . " -->";
-    }
-}
+        require_once __DIR__ . '/../db_connect.php';
 
         // Function to format student ID as YYYY-XXXXX
         function formatStudentId($id) {
@@ -619,7 +608,7 @@ if ($tables_result) {
     // Create account directly from row click
     function createAccountFromRow(studentId, studentName, email, course) {
         // Test connection first
-        fetch('debug_connection.php')
+        fetch('./debug_connection.php')
         .then(response => response.json())
         .then(debugData => {
             console.log('Connection Test Result:', debugData);

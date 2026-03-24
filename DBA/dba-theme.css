@@ -1,0 +1,47 @@
+/* DBA Theme Overrides - Blue Palette
+ *
+ * This file now aligns DBA pages with the main
+ * admin dashboard blue color scheme.
+ */
+
+/* Primary blues and variations (Tailwind-inspired) */
+:root {
+  --dba-blue: #2563eb;          /* blue-600 */
+  --dba-blue-dark: #1d4ed8;     /* blue-700 */
+  --dba-blue-text: #1e3a8a;     /* blue-900 */
+  --dba-blue-light: #dbeafe;    /* blue-100 */
+  --dba-blue-lighter: #eff6ff;  /* blue-50 */
+  --dba-blue-border-light: #bfdbfe; /* blue-200 */
+}
+
+/* Background helpers (kept in case pages relied on them) */
+.bg-blue-500 { background-color: var(--dba-blue) !important; }
+.bg-blue-600 { background-color: var(--dba-blue-dark) !important; }
+.bg-blue-100 { background-color: var(--dba-blue-light) !important; }
+.bg-blue-50  { background-color: var(--dba-blue-lighter) !important; }
+
+/* Text colors */
+.text-blue-600,
+.text-blue-700,
+.text-blue-800 { color: var(--dba-blue-text) !important; }
+
+.text-blue-100 { color: var(--dba-blue-lighter) !important; }
+
+/* Borders */
+.border-blue-600,
+.border-blue-500 { border-color: var(--dba-blue-text) !important; }
+
+.border-blue-200,
+.border-blue-100 { border-color: var(--dba-blue-border-light) !important; }
+
+/* Hover states */
+.hover\:bg-blue-500:hover { background-color: var(--dba-blue) !important; }
+.hover\:bg-blue-600:hover { background-color: var(--dba-blue-dark) !important; }
+.hover\:bg-blue-100:hover { background-color: var(--dba-blue-light) !important; }
+.hover\:bg-blue-50:hover  { background-color: var(--dba-blue-lighter) !important; }
+
+/* Links and buttons that were blue text on white */
+.a-blue,
+.text-blue-600 a,
+.text-blue-700 a,
+.text-blue-800 a { color: var(--dba-blue-text) !important; }

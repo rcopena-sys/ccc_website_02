@@ -32,51 +32,6 @@ function checkIrregularStatus($conn, $studentId, $currentYear, $currentSem) {
     return false;
 }
 
-// Function to get curriculum courses for regular students
-function getCurriculumCourses($conn, $program = 'BSIT', $yearLevel = 2) {
-    $curriculumCourses = [
-        '2-1' => [],
-        '2-2' => []
-    ];
-    
-    // Connect to curriculum database
-    $curriculumConn = new mysqli("localhost", "root", "", "ccc_curriculum_evaluation");
-    if ($curriculumConn->connect_error) {
-        echo '<!-- Error connecting to curriculum DB: ' . $curriculumConn->connect_error . ' -->';
-        return $curriculumCourses;
-    }
-    
-    // Get curriculum courses for second year
-    $query = "SELECT course_code, course_title, lec_units, lab_units, total_units, prerequisites, year_semester 
-              FROM curriculum_bsit 
-              WHERE year_semester IN ('2-1', '2-2') 
-              ORDER BY year_semester, course_code";
-    
-    $result = $curriculumConn->query($query);
-    if ($result && $result->num_rows > 0) {
-        while ($row = $result->fetch_assoc()) {
-            $semesterKey = $row['year_semester'];
-            
-            $courseData = [
-                'course_code' => $row['course_code'] ?? '',
-                'course_title' => $row['course_title'] ?? '',
-                'lec_units' => $row['lec_units'] ?? 0,
-                'lab_units' => $row['lab_units'] ?? 0,
-                'total_units' => $row['total_units'] ?? 0,
-                'prerequisites' => $row['prerequisites'] ?? '',
-                'is_irregular' => false
-            ];
-            
-            if (isset($curriculumCourses[$semesterKey])) {
-                $curriculumCourses[$semesterKey][] = $courseData;
-            }
-        }
-    }
-    
-    $curriculumConn->close();
-    return $curriculumCourses;
-}
-
 // Function to get irregular courses for a student
 function getIrregularCourses($conn, $studentId, $year, $semester) {
     $irregularCourses = [];
@@ -143,7 +98,8 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['student_id'])) {
     header("Location: index.php");
     exit();
 }
-require_once 'db_connect.php';
+session_start();
+require_once __DIR__ . '/../db_connect.php';
 
 // Initialize student data
 $student_id = $_SESSION['student_id'];
@@ -155,7 +111,6 @@ $first_sem_units = 0;
 $second_sem_units = 0;
 $totalProgramUnits = 0;
 $completedUnits = 0;
-$totalUnits = 0; // Initialize totalUnits variable
 $isIrregular = false;
 
 // First get basic student info
@@ -183,33 +138,19 @@ if (!empty($student)) {
     }
 }
 
-// Load courses based on student classification
-$courses = [];
-$studentClassification = strtolower($student['classification'] ?? 'regular');
+// Check if student is irregular for either semester (2-1 and 2-2)
+$isIrregular = checkIrregularStatus($conn, $student_id, 2, 1) || checkIrregularStatus($conn, $student_id, 2, 2);
 
-echo '<!-- Debug: Student classification: ' . htmlspecialchars($studentClassification) . ' -->';
-
-if ($studentClassification === 'irregular') {
-    // Load irregular courses for irregular students
-    echo '<!-- Loading irregular courses for second year -->';
+// Get irregular courses if any
+$irregularCourses = [];
+if ($isIrregular) {
     $irregularCourses = array_merge(
         getIrregularCourses($conn, $student_id, 2, 1),
         getIrregularCourses($conn, $student_id, 2, 2)
     );
     
-    // Organize irregular courses by semester
-    $courses = [
-        '2-1' => [],
-        '2-2' => []
-    ];
-    
+    // Add irregular courses to gradesByCode for display
     foreach ($irregularCourses as $course) {
-        $semesterKey = '2-' . ($course['semester'] ?? 1);
-        if (isset($courses[$semesterKey])) {
-            $courses[$semesterKey][] = $course;
-        }
-        
-        // Add irregular courses to gradesByCode for display
         $courseCode = strtoupper(trim($course['course_code']));
         if (!isset($gradesByCode[$courseCode])) {
             $gradesByCode[$courseCode] = [
@@ -221,10 +162,13 @@ if ($studentClassification === 'irregular') {
             ];
         }
     }
-} else {
-    // Load curriculum courses for regular students
-    echo '<!-- Loading curriculum courses for second year regular student -->';
-    $courses = getCurriculumCourses($conn, 'BSIT', 2);
+}
+
+// Initialize total units
+$totalUnits = 0;
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['student_id'])) {
+    header("Location: index.php");
+    exit();
 }
 
 // Initialize grades array
@@ -273,9 +217,20 @@ foreach ($gradesByCode as $gcode => $ginfo) {
     }
 }
 
+// Preload irregular courses for Year 2 (semesters 2-1 and 2-2) if any
+$irregular_2_1 = [];
+$irregular_2_2 = [];
+try {
+    $irregular_2_1 = getIrregularCourses($conn, $student_id, 2, 1);
+    $irregular_2_2 = getIrregularCourses($conn, $student_id, 2, 2);
+    echo '<!-- Found ' . count($irregular_2_1) . ' irregular courses for 2-1 and ' . count($irregular_2_2) . ' for 2-2 -->';
+} catch (Exception $e) {
+    error_log('Failed to preload irregular courses: ' . $e->getMessage());
+}
+
 // Use the existing connection from db_connect.php; ensure $db is set for debug
 if (!isset($db) || empty($db)) {
-    $db = 'ccc_curriculum_evaluation';
+    $db = 'u220649928_ccc_curriculum';
 }
 // Debug: Show database being used
 echo '<!-- Using database: ' . $db . ' -->';
@@ -472,7 +427,26 @@ try {
     // Update session with total units
     $_SESSION['total_units'] = $completedUnits;
     
-    // Recompute completed units against the final $courses arrays
+    // After loading regular courses, if there are irregular course records for Year 2, replace those semesters
+    if (!empty($irregular_2_1)) {
+        // Replace first semester (2-1) courses with irregular courses
+        $old_first = $first_sem_units;
+        $courses['2-1'] = $irregular_2_1;
+        $first_sem_units = array_sum(array_column($irregular_2_1, 'total_units'));
+        $totalProgramUnits += ($first_sem_units - $old_first);
+        echo '<!-- Replaced 2-1 with ' . count($irregular_2_1) . ' irregular courses; first_sem_units now ' . $first_sem_units . ' -->';
+    }
+
+    if (!empty($irregular_2_2)) {
+        // Replace second semester (2-2) courses with irregular courses
+        $old_second = $second_sem_units;
+        $courses['2-2'] = $irregular_2_2;
+        $second_sem_units = array_sum(array_column($irregular_2_2, 'total_units'));
+        $totalProgramUnits += ($second_sem_units - $old_second);
+        echo '<!-- Replaced 2-2 with ' . count($irregular_2_2) . ' irregular courses; second_sem_units now ' . $second_sem_units . ' -->';
+    }
+
+    // Recompute completed units against the final $courses arrays (regular + any irregular replacements)
     $completedUnits = 0;
     foreach ($courses as $semCourses) {
         foreach ($semCourses as $c) {
@@ -485,7 +459,6 @@ try {
     }
     // Update session with recomputed completed units
     $_SESSION['total_units'] = $completedUnits;
-    $totalUnits = $completedUnits; // Update totalUnits for display
 
 } catch (Exception $e) {
     echo '<!-- Error: ' . htmlspecialchars($e->getMessage()) . ' -->';
@@ -498,7 +471,6 @@ try {
     $second_sem_units = 0;
     $totalProgramUnits = 0;
     $completedUnits = 0;
-    $totalUnits = 0; // Ensure totalUnits is defined in error case
 }
 
 ?>
@@ -1287,7 +1259,7 @@ try {
                     <i class="bi bi-book"></i> Fourth Year
                 </a>
             </li>
-            <li class="nav-item mb-2">
+              <li class="nav-item mb-2">
                 <a href="print_prospectus.php" class="nav-link text-white">
                     <i class="bi bi-printer"></i> Print Prospectus
                 </a>
@@ -1327,7 +1299,7 @@ try {
                     <div class="barcode-container d-inline-block">
                         <svg id="barcode" style="display: block; margin: 0 auto;"></svg>
                         <div class="barcode-text small mt-1">ID: <?php echo htmlspecialchars($student['student_id']); ?></div>
-                        <div class="prospectus-title fw-bold">PROSPECTUS</div>
+                        <div class="prospectus-title fw-bold">STUDY LOAD</div>
                     </div>
                     <script>
                         // Initialize barcode with student ID
@@ -2003,8 +1975,7 @@ try {
         }
         echo 'Decision: <b style="color: ' . htmlspecialchars($decisionColor) . '">' . htmlspecialchars($decision) . '</b>';
         echo '</div>';
-
-// Check if student has any irregular courses
+  // Check if student has any irregular courses
 $hasIrregularCourses = false;
 if (!empty($student_id)) {
     $checkIrregular = $conn->prepare("
@@ -2035,43 +2006,6 @@ if ($hasIrregularCourses) {
     echo '<div style="margin-top:2px;font-size:9px;">PROGRAM DIRECTOR</div>';
     echo '</div>';
 }
-
-        
-        // Check for e-signature for 2nd year semesters (2-1 and 2-2)
-        $student_id = $studentData['student_id'] ?? '';
-        $signature_displayed = false;
-        
-        if (!empty($student_id)) {
-            // Check for 2nd year semesters signature
-            $sigQuery = "SELECT signature_filename FROM evaluation_signatures 
-                        WHERE student_id = ? AND year_semester IN ('2-1', '2-2') 
-                        ORDER BY evaluation_date DESC LIMIT 1";
-            $sigStmt = $conn->prepare($sigQuery);
-            if ($sigStmt) {
-                $sigStmt->bind_param('s', $student_id);
-                $sigStmt->execute();
-                $sigResult = $sigStmt->get_result();
-                if ($sigResult && $sigResult->num_rows > 0) {
-                    $sigRow = $sigResult->fetch_assoc();
-                    $signature_file = $sigRow['signature_filename'];
-                    
-                    if (!empty($signature_file) && file_exists("../adminpage/uploads/evaluation_signatures/" . $signature_file)) {
-                        echo '<div style="margin-top:5px;">';
-                        echo '<img src="../adminpage/uploads/evaluation_signatures/' . htmlspecialchars($signature_file) . 
-                             '" alt="Program Director Signature" style="max-height:40px;max-width:150px;">';
-                        echo '</div>';
-                        $signature_displayed = true;
-                    }
-                }
-                $sigStmt->close();
-            }
-        }
-        
-        echo '<div style="margin-top:2px;font-size:9px;">';
-        echo 'PROGRAM DIRECTOR';
-        echo '</div>';
-        echo '</div>';
-
         // Close database connection
         $conn->close();
         ?>

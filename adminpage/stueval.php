@@ -1,6 +1,6 @@
 <?php
-require_once 'db.php';
-
+session_start();
+require_once __DIR__ . '/../db_connect.php';
 // Check if a student is regular based on classification
 function isRegularStudent($studentData) {
     if (!isset($studentData['classification'])) {
@@ -588,141 +588,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_irregular') {
     }
     
     echo json_encode(['success' => true, 'data' => $rows]);
-    exit;
-}
-
-// AJAX: calculate total units for a student and semester
-if (isset($_GET['action']) && $_GET['action'] === 'calculate_units') {
-    header('Content-Type: application/json');
-    $student_id = trim($_GET['student_id'] ?? '');
-    $ys = trim($_GET['ys'] ?? '');
-
-    if ($student_id === '' || $ys === '') {
-        echo json_encode(['success' => false, 'message' => 'Missing parameters']);
-        exit;
-    }
-
-    // Parse year and semester
-    $parts = explode('-', $ys);
-    if (count($parts) !== 2) {
-        echo json_encode(['success' => false, 'message' => 'Invalid year-semester format']);
-        exit;
-    }
-    $yr = intval($parts[0]);
-    $sm = intval($parts[1]);
-
-    // Get grades for this student
-    $gradesByCode = [];
-    $gradesByPrefixYearSem = [];
-    
-    $gstmt = $conn->prepare("SELECT * FROM grades_db WHERE student_id = ? ORDER BY year, sem");
-    if ($gstmt) {
-        $gstmt->bind_param('s', $student_id);
-        $gstmt->execute();
-        $gres = $gstmt->get_result();
-        while ($g = $gres->fetch_assoc()) {
-            $code = !empty($g['course_code']) ? $g['course_code'] : $g['course_code'];
-            if (empty($code)) continue;
-            
-            $norm = strtoupper(preg_replace('/[^A-Z0-9]/', '', $code));
-            $gradeValue = !empty($g['final_grade']) ? $g['final_grade'] : ($g['grade'] ?? '');
-            
-            if (empty($gradeValue)) continue;
-            
-            $gradesByCode[$norm] = $gradeValue;
-            $gradesByCode[$code] = $gradeValue;
-            
-            $year = intval($g['year'] ?? 0);
-            $sem = intval($g['sem'] ?? 0);
-            
-            if ($year && $sem) {
-                $gradesByCode["{$norm}_{$year}_{$sem}"] = $gradeValue;
-                $gradesByCode["{$norm}-{$year}-{$sem}"] = $gradeValue;
-                
-                if (preg_match('/^([A-Z]+)/', $norm, $matches)) {
-                    $prefix = $matches[1];
-                    $gradesByCode["{$prefix}-{$year}-{$sem}"] = $gradeValue;
-                    $gradesByPrefixYearSem["{$prefix}-{$year}-{$sem}"] = $gradeValue;
-                }
-            }
-        }
-    }
-
-    // Get curriculum for this semester
-    $curriculum = [];
-    $checkYearSem = $conn->query("SHOW COLUMNS FROM curriculum LIKE 'year_semester'");
-    if ($checkYearSem && $checkYearSem->num_rows > 0) {
-        $sql = "SELECT course_code, course_title, total_units FROM curriculum WHERE year_semester = ? AND program = (SELECT course FROM signin_db WHERE student_id = ? LIMIT 1)";
-        $stmt = $conn->prepare($sql);
-        if ($stmt) {
-            $stmt->bind_param('ss', $ys, $student_id);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            while ($row = $result->fetch_assoc()) {
-                $curriculum[$row['course_code']] = $row;
-            }
-        }
-    }
-
-    // Calculate units from curriculum subjects with passing grades
-    $gradedUnits = 0;
-    foreach ($curriculum as $courseCode => $course) {
-        $grade = '';
-        
-        // Try to find grade using the same logic as in the display
-        if (isset($gradesByCode[$courseCode])) {
-            $grade = $gradesByCode[$courseCode];
-        }
-        
-        if (empty($grade)) {
-            $normalizedCode = strtoupper(preg_replace('/[^A-Z0-9]/', '', $courseCode));
-            foreach ($gradesByCode as $key => $value) {
-                $normalizedKey = strtoupper(preg_replace('/[^A-Z0-9]/', '', $key));
-                if ($normalizedKey === $normalizedCode) {
-                    $grade = $value;
-                    break;
-                }
-            }
-        }
-        
-        if (empty($grade) && preg_match('/^([A-Za-z]+)[\s-]*(\d+[A-Za-z]*)$/', $courseCode, $matches)) {
-            $prefix = strtoupper($matches[1]);
-            $number = $matches[2];
-            $pattern1 = $prefix . $number;
-            $pattern2 = $prefix . '-' . $number;
-            $pattern3 = $prefix . ' ' . $number;
-            
-            foreach ([$pattern1, $pattern2, $pattern3] as $pattern) {
-                if (isset($gradesByCode[$pattern])) {
-                    $grade = $gradesByCode[$pattern];
-                    break;
-                }
-            }
-        }
-        
-        // Only count units if grade exists and is a passing grade
-        if (!empty($grade)) {
-            $isPassed = false;
-            if (is_numeric($grade)) {
-                $gradeValue = floatval($grade);
-                if ($gradeValue <= 3.25) {
-                    $isPassed = true;
-                }
-            } elseif (is_string($grade) && strtoupper(trim($grade)) === 'PASSED') {
-                $isPassed = true;
-            }
-            
-            if ($isPassed) {
-                $courseUnits = floatval($course['total_units'] ?? 0);
-                if ($courseUnits == 0) {
-                    $courseUnits = 3; // Default to 3 units if 0 in curriculum
-                }
-                $gradedUnits += $courseUnits;
-            }
-        }
-    }
-    
-    echo json_encode(['success' => true, 'totalUnits' => $gradedUnits]);
     exit;
 }
 
@@ -3185,15 +3050,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         const modal = bootstrap.Modal.getInstance(addSubjectModal);
                         if (modal) modal.hide();
                         
-                        // Real-time update: refresh the page content without full reload
-                        setTimeout(() => {
-                            // Update the irregular units badge
-                            updateIrregularUnitsBadges();
-                            // Update the total units display
-                            updateTotalUnitsDisplay();
-                            // Show a subtle success indicator
-                            showUpdateSuccess();
-                        }, 500);
+                        // Reload page to show updated curriculum and irregular subjects
+                        window.location.reload();
                     } else {
                         throw new Error(data.message || 'Failed to add subject');
                     }
@@ -3898,95 +3756,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 });
-
-// Real-time update functions
-function updateIrregularUnitsBadges() {
-    // Update all irregular units badges with fresh data
-    document.querySelectorAll('.open-select-subjects').forEach(badge => {
-        const ys = badge.dataset.ys;
-        const studentId = '<?= htmlspecialchars($studentId) ?>';
-        
-        // Fetch updated irregular units count
-        fetch(`./stueval.php?action=get_irregular&student_id=${encodeURIComponent(studentId)}&ys=${encodeURIComponent(ys)}`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.success && data.data) {
-                    const totalUnits = data.data.reduce((sum, subject) => sum + parseFloat(subject.total_units || 0), 0);
-                    badge.innerHTML = `<i class="bi bi-plus-circle me-1"></i> ${totalUnits.toFixed(1)}`;
-                    
-                    // Add a brief highlight effect
-                    badge.classList.add('bg-warning');
-                    setTimeout(() => {
-                        badge.classList.remove('bg-warning');
-                        badge.classList.add('bg-success');
-                    }, 1000);
-                }
-            })
-            .catch(error => console.error('Error updating irregular units:', error));
-    });
-}
-
-function updateTotalUnitsDisplay() {
-    // Update total units display for each semester
-    document.querySelectorAll('[data-ys]').forEach(semesterDiv => {
-        const ys = semesterDiv.dataset.ys;
-        const studentId = '<?= htmlspecialchars($studentId) ?>';
-        
-        // Fetch updated total units calculation
-        fetch(`./stueval.php?action=calculate_units&student_id=${encodeURIComponent(studentId)}&ys=${encodeURIComponent(ys)}`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Update the badge showing total units
-                    const unitsBadge = semesterDiv.querySelector('.badge[data-bs-toggle="tooltip"]');
-                    if (unitsBadge && unitsBadge.innerHTML.includes('/')) {
-                        const maxUnits = unitsBadge.innerHTML.split('/')[1].trim();
-                        unitsBadge.innerHTML = `<i class="bi bi-calculator me-1"></i> ${data.totalUnits.toFixed(1)} / ${maxUnits}`;
-                        
-                        // Update over-limit styling
-                        const isOverLimit = data.totalUnits > parseFloat(maxUnits);
-                        if (isOverLimit) {
-                            unitsBadge.classList.remove('bg-secondary');
-                            unitsBadge.classList.add('bg-danger');
-                        } else {
-                            unitsBadge.classList.remove('bg-danger');
-                            unitsBadge.classList.add('bg-secondary');
-                        }
-                        
-                        // Add brief highlight effect
-                        unitsBadge.style.transform = 'scale(1.1)';
-                        setTimeout(() => {
-                            unitsBadge.style.transform = 'scale(1)';
-                        }, 500);
-                    }
-                }
-            })
-            .catch(error => console.error('Error updating total units:', error));
-    });
-}
-
-function showUpdateSuccess() {
-    // Show a subtle success indicator
-    const indicator = document.createElement('div');
-    indicator.className = 'position-fixed top-0 start-50 translate-middle-x mt-3';
-    indicator.style.zIndex = '1055';
-    indicator.innerHTML = `
-        <div class="alert alert-success alert-dismissible fade show" role="alert">
-            <i class="bi bi-check-circle me-2"></i>
-            <strong>Updated!</strong> Units have been recalculated.
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-    `;
-    document.body.appendChild(indicator);
-    
-    // Auto-remove after 3 seconds
-    setTimeout(() => {
-        if (indicator.parentNode) {
-            indicator.parentNode.removeChild(indicator);
-        }
-    }, 3000);
-}
-
+</script>
+</body>
+</html> 
 </script>
 </body>
 </html>

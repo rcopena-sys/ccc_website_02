@@ -1,33 +1,33 @@
 <?php
 session_start();
-// Check if user is logged in and is an admin (role_id = 2)
-if (!isset($_SESSION['user_id']) || $_SESSION['role_id'] != 2) {
+
+// Check if user is logged in and is an admin (role_id = 2, 10, or 11)
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role_id'], [2, 10, 11])) {
     header("Location: ../index.php");
     exit();
 }
 
+
 require_once '../db_connect.php';
 
-// Get unread count
+// Get unread count (NOW USING HOSTINGER CONNECTION)
 $unread_count = 0;
-$db = new mysqli('localhost', 'root', '', 'ccc_curriculum_evaluation');
-if (!$db->connect_error) {
+
+if (!$conn->connect_error) {
     $role_id = $_SESSION['role_id'];
     $recipient_type = ($role_id == 2) ? 'registrar' : 'dean';
+
     $query = "SELECT COUNT(*) as count FROM messages_db WHERE recipient_type = ?";
-    
-    if ($stmt = $db->prepare($query)) {
+    if ($stmt = $conn->prepare($query)) {
         $stmt->bind_param("s", $recipient_type);
         if ($stmt->execute()) {
             $result = $stmt->get_result();
             if ($row = $result->fetch_assoc()) {
                 $unread_count = (int)$row['count'];
             }
-            $result->free();
         }
         $stmt->close();
     }
-    $db->close();
 }
 
 // Initialize user data
@@ -339,7 +339,7 @@ $conn->close();
     </div>
   </div>
   <!-- Sidebar -->
-  <aside id="sidebar" class="w-64 bg-blue-600 text-white p-6 flex flex-col transform transition-transform duration-300 ease-in-out">
+ <aside id="sidebar" class="w-64 bg-blue-600 text-white p-6 flex flex-col transform transition-transform duration-300 ease-in-out">
     <div class="flex flex-col items-center">
       <img src="dci.png.png" class="rounded-full border-4 border-white" alt="DCI Logo" />
       <h2 class="mt-4 font-semibold text-lg">DCI</h2>
@@ -350,12 +350,11 @@ $conn->close();
       <a href="profile.php" class="block py-2 px-4 rounded hover:bg-blue-500 transition-colors duration-200">
         <i class="fas fa-user mr-2"></i> Profile
       </a>
-      <a href="feedback.php" class="block py-2 px-4 rounded hover:bg-blue-500 transition-colors duration-200">Feedback</a>
+      <!-- <a href="feedback.php" class="block py-2 px-4 rounded hover:bg-blue-500 transition-colors duration-200">Feedback</a> -->
       <a href="calendean.php" class="block py-2 px-4 rounded hover:bg-blue-500 transition-colors duration-200">Calendar of Events</a>
       <a href="about_us.php" class="block py-2 px-4 rounded hover:bg-blue-500 transition-colors duration-200">
         <i class="fas fa-info-circle mr-2"></i> About Us
       </a>
-      
       <!-- Student Dropdown -->
       <div class="relative">
         <button id="studentDropdownBtn" class="w-full flex justify-between items-center py-2 px-4 rounded bg-blue-500 hover:bg-blue-600 focus:outline-none">
@@ -534,7 +533,7 @@ $conn->close();
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
   <!-- Feedback Notifications -->
-  <
+  
   
   <style>
     /* Smooth transitions for the sidebar and main content */

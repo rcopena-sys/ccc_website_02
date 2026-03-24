@@ -4,7 +4,7 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['student_id'])) {
     header("Location: index.php");
     exit();
 }
-require_once 'db_connect.php';
+require_once __DIR__ . '/../db_connect.php';
 
 // Get student information
 $student_id = $_SESSION['student_id'];

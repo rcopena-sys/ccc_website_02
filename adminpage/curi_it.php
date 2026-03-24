@@ -1,6 +1,7 @@
 <?php
-// Database connection
-require_once 'db.php';
+session_start();
+require_once __DIR__ . '/../db_connect.php';
+
 
 // Get selected fiscal year
 $selectedFiscalYear = isset($_GET['fiscal_year']) ? $_GET['fiscal_year'] : '';

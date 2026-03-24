@@ -1,6 +1,7 @@
 <?php
 // Database connection
 require_once 'db.php';
+/** @var mysqli $conn */
 
 // Check connection
 if ($conn->connect_error) {
@@ -16,7 +17,7 @@ if ($tableCheck->num_rows === 0) {
         fiscal_year VARCHAR(20) NOT NULL,
         program VARCHAR(10) NOT NULL,
         year_semester VARCHAR(10) NOT NULL,
-        subject_code VARCHAR(20) NOT NULL,
+        course_code VARCHAR(20) NOT NULL,
         course_title VARCHAR(200) NOT NULL,
         lec_units DECIMAL(3,1) NOT NULL,
         lab_units DECIMAL(3,1) NOT NULL,
@@ -33,8 +34,11 @@ $program = $_POST['program'];
 $year_semester = $_POST['year_semester'];
 $fiscal_year = $_POST['fiscal_year'] ?? '2024-2025'; // Default fiscal year if not provided
 
-// Prepare arrays for batch insertion
-$subject_codes = $_POST['subject_code'];
+// Prepare arrays for batch insertion (support both subject_code and course_code from the form)
+$course_codes = $_POST['course_code'] ?? ($_POST['subject_code'] ?? []);
+if (!is_array($course_codes)) {
+    $course_codes = [];
+}
 $course_titles = $_POST['course_title'];
 $lec_units = $_POST['lec_units'];
 $lab_units = $_POST['lab_units'];
@@ -50,30 +54,30 @@ $conn->begin_transaction();
 
 try {
     // Insert each subject (check for duplicates first)
-    for ($i = 0; $i < count($subject_codes); $i++) {
+    for ($i = 0; $i < count($course_codes); $i++) {
         // Check if this subject already exists for this program, fiscal year, and semester
-        $check_sql = "SELECT id FROM curriculum WHERE fiscal_year = ? AND program = ? AND year_semester = ? AND subject_code = ?";
+        $check_sql = "SELECT id FROM curriculum WHERE fiscal_year = ? AND program = ? AND year_semester = ? AND course_code = ?";
         $check_stmt = $conn->prepare($check_sql);
         $check_stmt->bind_param("ssss", 
             $fiscal_year,
             $program,
             $year_semester,
-            $subject_codes[$i]
+            $course_codes[$i]
         );
         $check_stmt->execute();
         $check_result = $check_stmt->get_result();
         
         if ($check_result->num_rows === 0) {
             // Subject doesn't exist, insert it
-            $sql = "INSERT INTO curriculum (fiscal_year, program, year_semester, subject_code, course_title, lec_units, lab_units, total_units, prerequisites) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            $sql = "INSERT INTO curriculum (fiscal_year, program, year_semester, course_code, course_title, lec_units, lab_units, total_units, prerequisites) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
             
             $stmt = $conn->prepare($sql);
             $stmt->bind_param("ssssssiis", 
                 $fiscal_year,
                 $program,
                 $year_semester,
-                $subject_codes[$i],
+            $course_codes[$i],
                 $course_titles[$i],
                 $lec_units[$i],
                 $lab_units[$i],
@@ -89,16 +93,13 @@ try {
             $stmt->close();
         } else {
             // Subject already exists, skip it
-            $errors[] = 'Row ' . ($i + 1) . ': Subject ' . $subject_codes[$i] . ' already exists for this semester';
+            $errors[] = 'Row ' . ($i + 1) . ': Subject ' . $course_codes[$i] . ' already exists for this semester';
         }
         $check_stmt->close();
     }
     
     // Commit transaction
     $conn->commit();
-    
-    // Close connection before redirect
-    $conn->close();
     
     // Redirect based on program
     $redirect_page = ($program === 'BSCS') ? 'curi_cs.php' : 'curi_it.php';
@@ -108,12 +109,9 @@ try {
 } catch (Exception $e) {
     // Rollback on error
     $conn->rollback();
-    
-    // Close connection before redirect
-    $conn->close();
-    
     header("Location: add_curriculum.php?error=" . urlencode($e->getMessage()));
     exit();
 }
 
-?>
+$conn->close();
+?> 

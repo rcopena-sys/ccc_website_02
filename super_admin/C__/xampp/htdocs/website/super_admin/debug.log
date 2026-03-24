@@ -1,0 +1,45 @@
+[11-Feb-2026 14:49:04 UTC] PHP Warning:  require(vendor/autoload.php): Failed to open stream: No such file or directory in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[11-Feb-2026 14:49:04 UTC] PHP Fatal error:  Uncaught Error: Failed opening required 'vendor/autoload.php' (include_path='.:/opt/alt/php83/usr/share/pear:/opt/alt/php83/usr/share/php:/usr/share/pear:/usr/share/php') in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php:29
+Stack trace:
+#0 {main}
+  thrown in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[11-Feb-2026 14:49:16 UTC] PHP Warning:  require(vendor/autoload.php): Failed to open stream: No such file or directory in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[11-Feb-2026 14:49:16 UTC] PHP Fatal error:  Uncaught Error: Failed opening required 'vendor/autoload.php' (include_path='.:/opt/alt/php83/usr/share/pear:/opt/alt/php83/usr/share/php:/usr/share/pear:/usr/share/php') in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php:29
+Stack trace:
+#0 {main}
+  thrown in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[11-Feb-2026 14:51:08 UTC] PHP Warning:  require(vendor/autoload.php): Failed to open stream: No such file or directory in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[11-Feb-2026 14:51:08 UTC] PHP Fatal error:  Uncaught Error: Failed opening required 'vendor/autoload.php' (include_path='.:/opt/alt/php83/usr/share/pear:/opt/alt/php83/usr/share/php:/usr/share/pear:/usr/share/php') in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php:29
+Stack trace:
+#0 {main}
+  thrown in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[11-Feb-2026 14:52:10 UTC] PHP Warning:  require(vendor/autoload.php): Failed to open stream: No such file or directory in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[11-Feb-2026 14:52:10 UTC] PHP Fatal error:  Uncaught Error: Failed opening required 'vendor/autoload.php' (include_path='.:/opt/alt/php83/usr/share/pear:/opt/alt/php83/usr/share/php:/usr/share/pear:/usr/share/php') in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php:29
+Stack trace:
+#0 {main}
+  thrown in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[11-Feb-2026 15:09:17 UTC] PHP Warning:  require(./vendor/autoload.php): Failed to open stream: No such file or directory in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[11-Feb-2026 15:09:17 UTC] PHP Fatal error:  Uncaught Error: Failed opening required './vendor/autoload.php' (include_path='.:/opt/alt/php83/usr/share/pear:/opt/alt/php83/usr/share/php:/usr/share/pear:/usr/share/php') in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php:29
+Stack trace:
+#0 {main}
+  thrown in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[12-Feb-2026 01:44:57 UTC] PHP Warning:  require(./vendor/autoload.php): Failed to open stream: No such file or directory in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[12-Feb-2026 01:44:57 UTC] PHP Fatal error:  Uncaught Error: Failed opening required './vendor/autoload.php' (include_path='.:/opt/alt/php83/usr/share/pear:/opt/alt/php83/usr/share/php:/usr/share/pear:/usr/share/php') in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php:29
+Stack trace:
+#0 {main}
+  thrown in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[12-Feb-2026 01:48:13 UTC] PHP Warning:  require(./vendor/autoload.php): Failed to open stream: No such file or directory in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[12-Feb-2026 01:48:13 UTC] PHP Fatal error:  Uncaught Error: Failed opening required './vendor/autoload.php' (include_path='.:/opt/alt/php83/usr/share/pear:/opt/alt/php83/usr/share/php:/usr/share/pear:/usr/share/php') in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php:29
+Stack trace:
+#0 {main}
+  thrown in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[12-Feb-2026 06:00:25 UTC] PHP Warning:  require(./vendor/autoload.php): Failed to open stream: No such file or directory in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[12-Feb-2026 06:00:25 UTC] PHP Fatal error:  Uncaught Error: Failed opening required './vendor/autoload.php' (include_path='.:/opt/alt/php83/usr/share/pear:/opt/alt/php83/usr/share/php:/usr/share/pear:/usr/share/php') in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php:29
+Stack trace:
+#0 {main}
+  thrown in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[12-Feb-2026 06:02:53 UTC] PHP Warning:  require(./vendor/autoload.php): Failed to open stream: No such file or directory in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29
+[12-Feb-2026 06:02:53 UTC] PHP Fatal error:  Uncaught Error: Failed opening required './vendor/autoload.php' (include_path='.:/opt/alt/php83/usr/share/pear:/opt/alt/php83/usr/share/php:/usr/share/pear:/usr/share/php') in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php:29
+Stack trace:
+#0 {main}
+  thrown in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 29

@@ -8,41 +8,15 @@ ini_set('display_errors', 1);
 
 $error_message = '';
 
-// Reset failed attempts if lockout period has passed
-if (isset($_POST['email'])) {
-    $email = trim($_POST['email']);
-    $stmt = $conn->prepare("SELECT last_failed_attempt, failed_attempts FROM signin_db WHERE email = ?");
-    $stmt->bind_param("s", $email);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    
-    if ($result->num_rows === 1) {
-        $user = $result->fetch_assoc();
-        if ($user['last_failed_attempt'] && $user['failed_attempts'] >= 5) {
-            $lockout_duration = 5 * 60; // 5 minutes in seconds
-            $time_elapsed = time() - strtotime($user['last_failed_attempt']);
-            
-            if ($time_elapsed > $lockout_duration) {
-                // Reset failed attempts
-                $reset = $conn->prepare("UPDATE signin_db 
-                                       SET failed_attempts = 0, 
-                                           last_failed_attempt = NULL 
-                                       WHERE email = ?");
-                $reset->bind_param("s", $email);
-                $reset->execute();
-                $reset->close();
-            }
-        }
-    }
-    $stmt->close();
-}
-
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $email = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
 
     if (empty($email) || empty($password)) {
         $error_message = "Please enter both email and password.";
+    } elseif ((APP_ENV !== 'local') && !preg_match('/@ccc\.edu\.ph$/i', $email)) {
+        // Enforce @ccc.edu.ph email domain only in production
+        $error_message = "Only @ccc.edu.ph email addresses are allowed.";
     } else {
         try {
             $stmt = $conn->prepare("SELECT id, firstname, lastname, email, password, role_id, status, failed_attempts, last_failed_attempt
@@ -58,90 +32,128 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             if ($result->num_rows === 1) {
                 $user = $result->fetch_assoc();
 
-                // Check if account is active
-                if ($user['status'] !== 'Active') {
-                    $error_message = "Your account is inactive. Please contact the administrator.";
+                // Check if account is active and password is correct
+                $validPassword = false;
+
+                // If password looks like a bcrypt hash, use password_verify
+                if (preg_match('/^\$2[ayb]\$/', $user['password'])) {
+                    $validPassword = password_verify($password, $user['password']);
+                } elseif (defined('APP_ENV') && APP_ENV === 'local') {
+                    // Local dev fallback: support plain-text passwords in the DB
+                    // (useful when importing old data). In production we NEVER
+                    // accept plain-text comparison.
+                    if (!empty($user['password'])) {
+                        $validPassword = hash_equals($user['password'], $password);
+                    }
+
+                    // As a last-resort for local development only, if comparison
+                    // still fails but the account exists, allow login so you can
+                    // get in and then reset the password properly from inside
+                    // the application. This branch is NEVER used in production.
+                    if (!$validPassword) {
+                        $validPassword = true;
+                    }
                 }
-                // Check password (supports both hashed and plaintext during transition)
-                if (password_verify($password, $user['password']) || $password === $user['password']) {
 
-                    // Password is correct, start session
-                    $_SESSION['user_id'] = $user['id'];
-                    $_SESSION['email'] = $user['email'];
-                    $_SESSION['firstname'] = $user['firstname'] ?? '';
-                    $_SESSION['lastname'] = $user['lastname'] ?? '';
-                    $_SESSION['role_id'] = $user['role_id'];
+                if ($validPassword) {
+                    // Check if account is active (case-insensitive check)
+                    if (strtolower($user['status']) !== 'active') {
+                        $error_message = "Your account is not active. Please contact support.";
+                        $_SESSION['toast_error'] = $error_message;
+                    } else {
+                        // Reset failed attempts on successful login
+                        $resetStmt = $conn->prepare("UPDATE signin_db SET failed_attempts = 0, last_failed_attempt = NULL WHERE id = ?");
+                        $resetStmt->bind_param("i", $user['id']);
+                        $resetStmt->execute();
 
-                    //Reset failed attempts
-                    $reset = $conn->prepare("UPDATE signin_db SET failed_attempts = 0, last_failed_attempt = NULL WHERE id = ?");
-                    $reset->bind_param("i", $user['id']);
-                    $reset->execute();
-                    $reset->close();
+                        // Generate OTP and send email for 2FA (all environments)
+                        // Generate OTP for 2FA
+                        $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
 
-                    // Update password to hashed version if it was plaintext
-                    if ($password === $user['password']) {
-                        $hashed_password = password_hash($password, PASSWORD_DEFAULT);
-                        $update_stmt = $conn->prepare("UPDATE signin_db SET password = ? WHERE id = ?");
-                        $update_stmt->bind_param("si", $hashed_password, $user['id']);
-                        $update_stmt->execute();
-                        $update_stmt->close();
-                    }
+                        // Store OTP in database with DB-controlled expiry (NOW() + 5 minutes)
+                        $otpStmt = $conn->prepare("INSERT INTO two_factor_auth (user_id, token, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE))");
+                        $otpStmt->bind_param("is", $user['id'], $otp);
+                        $otpStmt->execute();
 
-                    // Log successful login with detailed information
-                    try {
-                        $logUserId = $user['id'];
-                        $logUsername = $user['email'];
-                        $logAction = 'Login';
-                        // Include user role and name in details
-                        $roleName = match ($user['role_id']) {
-                            1 => 'Super Admin',
-                            2 => 'Admin',
-                            3 => 'Registrar',
-                            4 => 'DCI Student',
-                            5 => 'CS Student',
-                            default => 'Student'
-                        };
-                        $logDetails = sprintf(
-                            'User logged in successfully - %s %s (%s)',
-                            $user['firstname'],
-                            $user['lastname'],
-                            $roleName
-                        );
-                        $logIp = $_SERVER['REMOTE_ADDR'] ?? '';
-                        $logUa = $_SERVER['HTTP_USER_AGENT'] ?? '';
+                        // Store user data in session for 2FA
+                        $_SESSION['user_id_2fa'] = $user['id'];
+                        $_SESSION['email_2fa'] = $user['email'];
+                        $_SESSION['firstname_2fa'] = $user['firstname'];
+                        $_SESSION['lastname_2fa'] = $user['lastname'];
+                        $_SESSION['role_id_2fa'] = $user['role_id'];
 
-                        // Insert the activity log
-                        $ls = $conn->prepare("INSERT INTO activity_log_db (user_id, username, action, details, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?)");
-                        if ($ls) {
-                            $ls->bind_param('isssss', $logUserId, $logUsername, $logAction, $logDetails, $logIp, $logUa);
-                            $ls->execute();
-                            $ls->close();
+                        // Send OTP via email
+                        require 'vendor/autoload.php';
+                        $mail = new PHPMailer\PHPMailer\PHPMailer(true);
+                        try {
+                            // Server settings
+                            $mail->isSMTP();
+                            $mail->Host = 'smtp.gmail.com';
+                            $mail->SMTPAuth = true;
+                            $mail->Username = 'rozzo4968@gmail.com'; // Your Gmail address
+                            $mail->Password = 'elduyrelyltgjhdr'; // Your Gmail App Password
+                            $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+                            $mail->Port = 587;
+
+                            // Recipients
+                            $mail->setFrom('noreply@ccc.edu.ph', 'CCC Security');
+                            $mail->addAddress($user['email']);
+
+                            // Content
+                            $mail->isHTML(true);
+                            $mail->Subject = 'Your Login Verification Code';
+                            $mail->Body = sprintf(
+                                '<h2>Your Verification Code</h2>
+                                <p>Hello %s,</p>
+                                <p>Your verification code is: <strong>%s</strong></p>
+                                <p>This code will expire in 5 minutes.</p>
+                                <p>If you didn\'t request this code, please ignore this email or contact support.</p>',
+                                htmlspecialchars($user['firstname']),
+                                $otp
+                            );
+
+                            $mail->send();
+
+                            // Log the 2FA attempt
+                            $logUserId = $user['id'];
+                            $logUsername = $user['email'];
+                            $logAction = '2FA Code Sent';
+                            $logDetails = sprintf(
+                                '2FA verification code sent to %s %s (%s)',
+                                $user['firstname'],
+                                $user['lastname'],
+                                $user['email']
+                            );
+
+                            // Insert the activity log if the table exists
+                            if ($conn->query("SHOW TABLES LIKE 'activity_log_db'")->num_rows > 0) {
+                                $ls = $conn->prepare("INSERT INTO activity_log_db (user_id, username, action, details, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?)");
+                                if ($ls) {
+                                    $ipAddress = $_SERVER['REMOTE_ADDR'] ?? '';
+                                    $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+                                    $ls->bind_param('isssss',
+                                        $logUserId,
+                                        $logUsername,
+                                        $logAction,
+                                        $logDetails,
+                                        $ipAddress,
+                                        $userAgent
+                                    );
+                                    $ls->execute();
+                                    $ls->close();
+                                }
+                            }
+
+                            // Redirect to 2FA verification
+                            header('Location: two_factor_auth.php');
+                            exit();
+
+                        } catch (Exception $e) {
+                            error_log('2FA email sending failed: ' . $e->getMessage());
+                            $error_message = 'Failed to send verification code. Please try again later.';
+                            $_SESSION['toast_error'] = $error_message;
                         }
-                    } catch (Exception $e) {
-                        error_log('Activity log insert failed (login): ' . $e->getMessage());
                     }
-
-                    // Redirect based on role
-                    switch ($user['role_id']) {
-                        case 1:
-                            header("Location: super_admin/homepage.php");
-                            break;
-                        case 2:
-                            header("Location: adminpage/dashboard2.php");
-                            break;
-                        case 3:
-                            header("Location: registrar/dashboardr.php");
-                            break;
-                        case 4:
-                            header("Location: student/dci_page.php");
-                            break;
-                        case 5:
-                            header("Location: student/cs_studash.php");
-                            break;
-                        default:
-                            header("Location: student/homepage.php");
-                    }
-                    exit();
                 } else {
                     // Password incorrect → increment failed attempts
                     $failedAttempts = $user['failed_attempts'] + 1;
@@ -414,9 +426,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 ?>
             </div>
         <?php endif; ?>
-            
+
         <form method="POST" action="">
-            <input type="email" name="email" placeholder="Email" value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>" required>
+            <input 
+    type="email" 
+    name="email" 
+    placeholder="Email" 
+    value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>" 
+    <?php if (APP_ENV !== 'local'): ?>
+        pattern="[a-zA-Z0-9._%+-]+@ccc\.edu\.ph$" 
+        title="Please enter a valid @ccc.edu.ph email address"
+    <?php endif; ?>
+    required
+>
 
             <div class="password-container">
                 <input type="password" name="password" id="password" placeholder="Password" required>
@@ -430,11 +452,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             <a href="forgot_password.php">forget password</a>
         </div>
 
-        <div class="social-links">
-            <a href="#"><i class="fab fa-facebook-f"></i></a>
-            <a href="#"><i class="fab fa-instagram"></i></a>
-            <a href="#"><i class="fab fa-twitter"></i></a>
-        </div>
     </div>
 
     <!-- Toast container for flash messages -->

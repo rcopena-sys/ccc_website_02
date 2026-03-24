@@ -234,6 +234,7 @@ $students_result = $conn->query($students_query);
             <div class="label">Registrar</div>
             <a href="dashboardr.php" class="nav-link">Dashboard</a>
             <a href="registrar.php" class="nav-link active">Student List</a>
+           
             <a href="student_evaluation.php" class="nav-link"><i class="fas fa-clipboard-check"></i> Student Evaluation</a>
             <a href="studentgrade.php" class="nav-link">Student Grade</a>
             <a href="fiscal_year.php" class="nav-link"><i class="fas fa-calendar"></i> Fiscal Year</a>
@@ -247,9 +248,7 @@ $students_result = $conn->query($students_query);
                     <a href="addsturegs.php" class="btn btn-primary">
                         <i class="fas fa-plus"></i> Add Student
                     </a>
-                    <a href="upload_csv.php" class="btn btn-success">
-                        <i class="fas fa-upload"></i> Upload CSV
-                    </a>
+                    
                 </div>
             </div>
             

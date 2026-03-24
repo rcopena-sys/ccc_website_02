@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student Dashboard</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      height: 100vh;
+      background: url('bg.jpg') no-repeat center center/cover;
+    }
+    .sidebar {
+      width: 250px;
+      background-color: #3b82f6;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 30px;
+    }
+    .sidebar img {
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      border: 4px solid #fff;
+      margin-bottom: 15px;
+    }
+    .sidebar h3 {
+      margin-bottom: 10px;
+    }
+    .sidebar nav a {
+      display: block;
+      width: 100%;
+      text-align: center;
+      padding: 15px;
+      color: #fff;
+      text-decoration: none;
+      transition: background 0.3s ease;
+    }
+    .sidebar nav a.active,
+    .sidebar nav a:hover {
+      background-color: #2563eb;
+    }
+    .main-content {
+      flex-grow: 1;
+      padding: 30px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 30px;
+      justify-content: center;
+      align-items: flex-start;
+      background-color: rgba(255,255,255,0.8);
+    }
+    .card {
+      background-color: #e5e7eb;
+      border-radius: 10px;
+      padding: 20px;
+      width: 180px;
+      text-align: center;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .card img {
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      object-fit: cover;
+      margin-bottom: 10px;
+    }
+    .card h4 {
+      margin: 10px 0 5px;
+    }
+    .card .actions {
+      margin-top: 10px;
+    }
+    .card .actions i {
+      font-size: 18px;
+      margin: 0 10px;
+      cursor: pointer;
+      color: #1f2937;
+    }
+  </style>
+  <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+  <div class="sidebar">
+    <img src="dean.jpg" alt="Dean Photo">
+    <h3>Arlou H. Fernando</h3>
+    <nav>
+      <a href="#">Dean</a>
+      <a href="#">Dashboard</a>
+      <a href="#" class="active">Student</a>
+      <a href="#">Curriculum</a>
+    </nav>
+  </div>
+
+  <div class="main-content">
+    <div class="card">
+      <img src="student1.jpg" alt="Saez Kisses Anne">
+      <h4>Saez Kisses Anne</h4>
+      <div class="actions">
+        <i class="fas fa-search"></i>
+        <i class="fas fa-pen"></i>
+      </div>
+    </div>
+
+    <div class="card">
+      <img src="student2.jpg" alt="Guevarra Nicole">
+      <h4>Guevarra Nicole</h4>
+      <div class="actions">
+        <i class="fas fa-search"></i>
+        <i class="fas fa-pen"></i>
+      </div>
+    </div>
+
+    <div class="card">
+      <img src="student3.jpg" alt="Dirige Philip Joshua">
+      <h4>Dirige Philip Joshua</h4>
+      <div class="actions">
+        <i class="fas fa-search"></i>
+        <i class="fas fa-pen"></i>
+      </div>
+    </div>
+
+    <div class="card">
+      <img src="student4.jpg" alt="Opena Rozz Allein">
+      <h4>Opena Rozz Allein</h4>
+      <div class="actions">
+        <i class="fas fa-search"></i>
+        <i class="fas fa-pen"></i>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

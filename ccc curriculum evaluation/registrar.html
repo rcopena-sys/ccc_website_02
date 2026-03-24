@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Dashboard</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        body {
+            background: white; /* Changed background to white */
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        .sidebar {
+            background-color: rgb(80, 77, 218); /* Changed sidebar background to transparent */
+            width: 180px;
+            height: 100vh;
+            color: black;
+            padding: 20px 10px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: start;
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+
+        .profile-circle {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background-color: gray;
+            margin-bottom: 30px;
+        }
+
+        .content {
+            flex-grow: 1;
+            background-color: transparent; /* Changed content background to transparent */
+            margin: 20px;
+            border-radius: 20px;
+            padding: 20px;
+            overflow-y: auto;
+            max-height: calc(100vh - 40px);
+            border: 2px solid purple; /* Added purple border */
+            position: relative; /* Added relative positioning */
+        }
+
+        .search-bar {
+        
+            margin-bottom: 30px;
+            top: 0px;
+            bottom: 100px;
+            nav-down:30px ;
+            padding: 10px;
+            width: 100%;
+            border-radius: 10px;
+            border: 1px solid #ddd;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: white;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 8px;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
+
+        .add-student-btn {
+            position: absolute;
+            top: 0px;
+            left: 10px;
+            background-color: white;
+            padding: 10px;
+            border-radius: 20px;
+            border: 1px solid black;
+            cursor: pointer;
+        }
+
+        .bulk-update-btn {
+            position: absolute;
+            top: 0px;
+            right: 10px;
+            background-color: white;
+            padding: 10px;
+            border-radius: 20px;
+            border: 1px solid black;
+            cursor: pointer;
+            right: 100px;
+        }
+
+        .watermark {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            opacity: 0.3; /* Adjust opacity as needed */
+            z-index: -1; /* Place behind other content */
+        }
+    </style>
+    <script>
+        function search() {
+            const input = document.getElementById('searchInput').value.toLowerCase();
+            const rows = document.querySelectorAll(".student-row");
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(input) ? "table-row" : "none";
+            });
+        }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <div class="profile-circle"><img src="regs.jpg" alt="My Small Photo" width="100"></div>
+            <div>Registrar</div>
+            <div style="margin-top: 20px;">Dashboard</div>
+        </div>
+        <div class="content">
+            <button class="bg-green-500 text-white py-2 px-4 rounded-lg">+Add Student</button>
+            <button class="bg-blue-500 text-white py-2 px-4 rounded-lg">Bulk/Update Student</button>
+            <img class="watermark" src="regs.jpg" alt="Watermark Logo" width="300">
+            <input type="text" id="searchInput" class="search-bar" placeholder="Search..." onkeyup="search()">
+            <table>
+                <tr>
+                    <th>Name</th>
+                    <th>Student ID</th>
+                    <th>Username</th>
+                    <th>Recovery Email</th>
+                    <th>CCC Email</th>
+                    <th>Program</th>
+                    <th>YR</th>
+                    <th>Major</th>
+                    <th>Gender</th>
+                    <th>Status</th>
+                </tr>
+                <tr class="student-row">
+                    <td>Opeña, Rozz Allein</td>
+                    <td>2022-10873</td>
+                    <td>RozzAlleinOpena</td>
+                    <td>rcopena@ccc.edu.ph</td>
+                    <td>rcopena@ccc.edu.ph</td>
+                    <td>BSIT</td>
+                    <td>3</td>
+                    <td>information technology</td>
+                    <td>Male</td>
+                    <td>Registered</td>
+                </tr>
+                <tr class="student-row">
+                    <td>Saez, Kisses Anne</td>
+                    <td>2022-10874</td>
+                    <td>KissesAnne</td>
+                    <td>ksaez@ccc.edu.ph</td>
+                    <td>ksaez@ccc.edu.ph</td>
+                    <td>BSIT</td>
+                    <td>2</td>
+                    <td>Accounting</td>
+                    <td>Female</td>
+                    <td>Registered</td>
+                </tr>
+                <tr class="student-row">
+                    <td>Dirige, Philip Joshua</td>
+                    <td>2022-10875</td>
+                    <td>PhilipDirige</td>
+                    <td>pdirige@ccc.edu.ph</td>
+                    <td>pdirige@ccc.edu.ph</td>
+                    <td>BSIT</td>
+                    <td>4</td>
+                    <td>Computer Science</td>
+                    <td>Male</td>
+                    <td>Registered</td>
+                </tr>
+                <tr class="student-row">
+                    <td>Guevarra, Nicole</td>
+                    <td>2022-10876</td>
+                    <td>NicoleGuevarra</td>
+                    <td>nguevarra@ccc.edu.ph</td>
+                    <td>nguevarra@ccc.edu.ph</td>
+                    <td>BSIT</td>
+                    <td>1</td>
+                    <td>Marketing</td>
+                    <td>Female</td>
+                    <td>Registered</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

@@ -6,16 +6,26 @@ function formatStudentId($id) {
     // Remove all non-digit characters
     $digits = preg_replace('/\D/', '', $id);
     
-    // If we have at least 9 digits, format as YYYY-NNNNN
+    // Accept two kinds of IDs:
+    // 1) New format: YYYY-NNNNN (9 digits total, stored as 2022-10873)
+    // 2) Old numeric IDs like 290015 (6 digits, stored as-is)
+
+    if ($digits === '') {
+        return '';
+    }
+
+    // Old-style 6-digit ID: keep as-is
+    if (preg_match('/^\d{6}$/', $digits)) {
+        return $digits;
+    }
+
+    // If we have at least 9 digits, format first 9 as YYYY-NNNNN
     if (strlen($digits) >= 9) {
+        $digits = substr($digits, 0, 9);
         return substr($digits, 0, 4) . '-' . substr($digits, 4, 5);
     }
-    
-    // If less than 9 digits, return as is or format what we have
-    if (strlen($digits) >= 4) {
-        return substr($digits, 0, 4) . '-' . substr($digits, 4);
-    }
-    
+
+    // Fallback: return digits unchanged
     return $digits;
 }
 
@@ -92,17 +102,101 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
     }
     $check_stmt->close();
 
+    // Check if student name already exists (allow only one record per name)
+    $check_name_stmt = $conn->prepare("SELECT student_id FROM students_db WHERE student_name = ?");
+    $check_name_stmt->bind_param("s", $student_name);
+    $check_name_stmt->execute();
+    $check_name_stmt->store_result();
+
+    if ($check_name_stmt->num_rows > 0) {
+        echo "<script>alert('A student with this name already exists.'); window.history.back();</script>";
+        exit();
+    }
+    $check_name_stmt->close();
+
     // Insert into students_db
     $stmt = $conn->prepare("INSERT INTO students_db (student_id, student_name, email, curriculum, classification, programs, academic_year, semester, status, gender, fiscal_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     $stmt->bind_param("sssssssssss", $student_id, $student_name, $email, $curriculum, $classification, $programs, $academic_year, $semester, $status, $gender, $fiscal_year);
 
     if ($stmt->execute()) {
+        // After successful student registration, try to auto-insert into assign_curriculum
+        // 1) Parse curriculum label like "BSIT (2022-2023)" into program and fiscal_year
+        $programForAssign = null;
+        $fiscalForAssign = null;
+        if (preg_match('/^(.*?)\s*\(([^)]+)\)$/', $curriculum, $matches)) {
+            $programForAssign = trim($matches[1]);
+            $fiscalForAssign = trim($matches[2]);
+        }
+
+        if ($programForAssign && $fiscalForAssign) {
+            // 2) Find matching curriculum record to get curriculum_id
+            $curStmt = $conn->prepare("SELECT id, program, fiscal_year FROM curriculum WHERE program = ? AND fiscal_year = ? LIMIT 1");
+            $curStmt->bind_param("ss", $programForAssign, $fiscalForAssign);
+            if ($curStmt->execute()) {
+                $curResult = $curStmt->get_result();
+                if ($curRow = $curResult->fetch_assoc()) {
+                    $curriculumId = (int)$curRow['id'];
+
+                    // 3) Find corresponding signin_db record for this student_id
+                    $signStmt = $conn->prepare("SELECT id FROM signin_db WHERE student_id = ? LIMIT 1");
+                    $signStmt->bind_param("s", $student_id);
+                    if ($signStmt->execute()) {
+                        $signResult = $signStmt->get_result();
+                        if ($signRow = $signResult->fetch_assoc()) {
+                            $signinId = (int)$signRow['id'];
+
+                            // 4) Check if assignment already exists
+                            $checkAssign = $conn->prepare("SELECT 1 FROM assign_curriculum WHERE program_id = ? AND curriculum_id = ? LIMIT 1");
+                            $checkAssign->bind_param("ii", $signinId, $curriculumId);
+                            if ($checkAssign->execute()) {
+                                $checkAssign->store_result();
+                                if ($checkAssign->num_rows === 0) {
+                                    // 5) Insert new assignment
+                                    $insertAssign = $conn->prepare("INSERT INTO assign_curriculum (program_id, curriculum_id, program, fiscal_year) VALUES (?, ?, ?, ?)");
+                                    $insertAssign->bind_param("iiss", $signinId, $curriculumId, $programForAssign, $fiscalForAssign);
+                                    $insertAssign->execute();
+                                    $insertAssign->close();
+                                }
+                            }
+                            $checkAssign->close();
+                        }
+                    }
+                    $signStmt->close();
+                }
+            }
+            $curStmt->close();
+        }
+
         echo "<script>alert('Student registered successfully!'); window.location.href='registrar.php';</script>";
     } else {
-        echo "<script>alert('Error registering student.'); window.history.back();</script>";
+        // Extra safety: if a UNIQUE index exists on student_id,
+        // catch database duplicate-key errors and show a clear message.
+        if ($stmt->errno === 1062 || (isset($stmt->error) && stripos($stmt->error, 'duplicate') !== false)) {
+            echo "<script>alert('A student with this ID already exists.'); window.history.back();</script>";
+        } else {
+            echo "<script>alert('Error registering student.'); window.history.back();</script>";
+        }
     }
     $stmt->close();
     $conn->close();
+}
+
+// Fetch distinct curriculum options based on existing assignments (assign_curriculum table)
+$curriculumOptions = [];
+if ($conn && $conn->connect_errno === 0) {
+    // Use assign_curriculum so options reflect actually assigned curricula
+    $curriculumSql = "SELECT DISTINCT curriculum_id, program, fiscal_year
+                      FROM assign_curriculum
+                      WHERE fiscal_year IS NOT NULL AND fiscal_year != ''
+                        AND program IS NOT NULL AND program != ''
+                      ORDER BY program, fiscal_year DESC";
+
+    if ($curriculumResult = $conn->query($curriculumSql)) {
+        while ($row = $curriculumResult->fetch_assoc()) {
+            $curriculumOptions[] = $row;
+        }
+        $curriculumResult->free();
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -124,8 +218,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
         <form id="manualAddForm" method="POST" action="">
             <div class="mb-3">
                 <label for="student_id" class="form-label">Student ID (Format: YYYY-NNNNN)</label>
-                <input type="text" class="form-control" id="student_id" name="student_id" placeholder="e.g., 2022-10873" pattern="[0-9]{4}-[0-9]{5}" maxlength="10" required>
-                <small class="text-muted">Enter 9 digits (year + student number). Format will be applied automatically.</small>
+                <input type="text" class="form-control" id="student_id" name="student_id" placeholder="e.g., 202210873 or 2022-10873 or 290015" pattern="([0-9]{4}-?[0-9]{5}|[0-9]{6})" maxlength="10" required>
+                <small class="text-muted">You can type 9 digits (e.g., 202210873) and the dash will be added automatically, or use a 6-digit ID like 290015.</small>
                 <div id="studentIdError" class="text-danger small mt-1"></div>
             </div>
             <div class="mb-3">
@@ -139,7 +233,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
             </div>
             <div class="mb-3">
                 <label for="curriculum" class="form-label">Curriculum</label>
-                <input type="text" class="form-control" id="curriculum" name="curriculum" required>
+                <select class="form-control" id="curriculum" name="curriculum" required>
+                    <option value="">Select Curriculum</option>
+                    <?php
+                    if (!empty($curriculumOptions)) {
+                        foreach ($curriculumOptions as $c) {
+                            $label = $c['program'] . ' (' . $c['fiscal_year'] . ')';
+                            $value = $label;
+                            $selected = (isset($_POST['curriculum']) && $_POST['curriculum'] === $value) ? 'selected' : '';
+                            echo '<option value="' . htmlspecialchars($value, ENT_QUOTES, 'UTF-8') . '" ' . $selected . '>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</option>';
+                        }
+                    }
+                    ?>
+                </select>
             </div>
             <div class="mb-3">
                 <label for="classification" class="form-label">Classification</label>
@@ -151,7 +257,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
             </div>
             <div class="mb-3">
                 <label for="programs" class="form-label">Programs</label>
-                <input type="text" class="form-control" id="programs" name="programs" required>
+                <select class="form-control" id="programs" name="programs" required>
+                    <option value="">Select Program</option>
+                    <option value="BSCS">BSCS</option>
+                    <option value="BSIT">BSIT</option>
+                </select>
             </div>
             <div class="mb-3">
                 <label for="academic_year" class="form-label">Year</label>
@@ -166,7 +276,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
             </div>
             <div class="mb-3">
                 <label for="semester" class="form-label">Semester</label>
-                <input type="text" class="form-control" id="semester" name="semester" required>
+                <select class="form-control" id="semester" name="semester" required>
+                    <option value="">Select Semester</option>
+                    <option value="1st Semester">1st Semester</option>
+                    <option value="2nd Semester">2nd Semester</option>
+                </select>
             </div>
             <div class="mb-3">
                 <label for="status" class="form-label">Status</label>
@@ -235,20 +349,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
         <a href="registrar.php" class="d-block text-center mt-4">Back to Student List</a>
     </div>
     <script>
-        // Auto-format student ID as user types
+        // Student ID handling
         const studentIdInput = document.getElementById('student_id');
         const submitBtn = document.getElementById('submitBtn');
         const manualForm = document.getElementById('manualAddForm');
         const studentIdError = document.getElementById('studentIdError');
 
+        // Allow typing digits and an optional dash; keep user-entered dash
         studentIdInput.addEventListener('input', function(e) {
-            let value = e.target.value.replace(/\D/g, ''); // Remove all non-digit characters
-            
-            // Add dash after 4 digits
-            if (value.length >= 4) {
-                value = value.substring(0, 4) + '-' + value.substring(4, 9);
+            let value = e.target.value;
+            // Keep only digits and '-'
+            value = value.replace(/[^0-9-]/g, '');
+            // Limit to max 10 characters (YYYY-NNNNN)
+            if (value.length > 10) {
+                value = value.substring(0, 10);
             }
-            
             e.target.value = value;
         });
 
@@ -282,13 +397,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
         
         // Validate format on form submission
         manualForm.addEventListener('submit', function(e) {
-            const studentId = document.getElementById('student_id').value;
-            const pattern = /^\d{4}-\d{5}$/;
+            const studentIdField = document.getElementById('student_id');
+            let studentId = studentIdField.value.trim();
+
+            // Normalize: if user typed 9 digits without a dash, auto-insert the dash (YYYYNNNNN -> YYYY-NNNNN)
+            let digitsOnly = studentId.replace(/\D/g, '');
+            if (digitsOnly.length === 9 && studentId.indexOf('-') === -1) {
+                studentId = digitsOnly.substring(0, 4) + '-' + digitsOnly.substring(4);
+                studentIdField.value = studentId; // update field so this is what gets submitted
+            }
+
+            // Accept: YYYY-NNNNN or YYYYNNNNN, or old 6-digit ID
+            const pattern = /^(\d{4}-?\d{5}|\d{6})$/;
             
             if (!pattern.test(studentId)) {
                 e.preventDefault();
-                alert('Student ID must be in format YYYY-NNNNN (e.g., 2022-10873)');
-                document.getElementById('student_id').focus();
+                alert('Student ID must be either in format YYYY-NNNNN (e.g., 2022-10890) or a 6-digit ID (e.g., 290015).');
+                studentIdField.focus();
                 return;
             }
             

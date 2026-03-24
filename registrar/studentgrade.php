@@ -1,5 +1,13 @@
 <?php
-require_once 'config.php';
+session_start();
+require_once __DIR__ . '/../db_connect.php';
+require_once '../config/global_func.php';
+
+// Check if user is logged in and is admin
+if (!isset($_SESSION['user_id']) || $_SESSION['role_id'] != 3) {
+    header('Location: ../index.php');
+    exit();
+}
 
 $success = false;
 $error = '';

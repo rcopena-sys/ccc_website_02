@@ -1,5 +1,4 @@
 <?php
-
 // Function to check if a student should be classified as irregular
 function checkIrregularStatus($conn, $studentId, $currentYear, $currentSem) {
     // Check regular courses
@@ -30,51 +29,6 @@ function checkIrregularStatus($conn, $studentId, $currentYear, $currentSem) {
     }
     
     return false;
-}
-
-// Function to get curriculum courses for regular students
-function getCurriculumCourses($conn, $program = 'BSIT', $yearLevel = 3) {
-    $curriculumCourses = [
-        '3-1' => [],
-        '3-2' => []
-    ];
-    
-    // Connect to curriculum database
-    $curriculumConn = new mysqli("localhost", "root", "", "ccc_curriculum_evaluation");
-    if ($curriculumConn->connect_error) {
-        echo '<!-- Error connecting to curriculum DB: ' . $curriculumConn->connect_error . ' -->';
-        return $curriculumCourses;
-    }
-    
-    // Get curriculum courses for third year
-    $query = "SELECT course_code, course_title, lec_units, lab_units, total_units, prerequisites, year_semester 
-              FROM curriculum_bsit 
-              WHERE year_semester IN ('3-1', '3-2') 
-              ORDER BY year_semester, course_code";
-    
-    $result = $curriculumConn->query($query);
-    if ($result && $result->num_rows > 0) {
-        while ($row = $result->fetch_assoc()) {
-            $semesterKey = $row['year_semester'];
-            
-            $courseData = [
-                'course_code' => $row['course_code'] ?? '',
-                'course_title' => $row['course_title'] ?? '',
-                'lec_units' => $row['lec_units'] ?? 0,
-                'lab_units' => $row['lab_units'] ?? 0,
-                'total_units' => $row['total_units'] ?? 0,
-                'prerequisites' => $row['prerequisites'] ?? '',
-                'is_irregular' => false
-            ];
-            
-            if (isset($curriculumCourses[$semesterKey])) {
-                $curriculumCourses[$semesterKey][] = $courseData;
-            }
-        }
-    }
-    
-    $curriculumConn->close();
-    return $curriculumCourses;
 }
 
 // Function to get irregular courses for a student
@@ -140,46 +94,25 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['student_id'])) {
     header("Location: index.php");
     exit();
 }
-require_once 'db_connect.php';
+session_start();
+require_once __DIR__ . '/../db_connect.php';
 
 // Initialize student data
 $student_id = $_SESSION['student_id'];
 
-// Get student information first
-$stmt = $conn->prepare("SELECT firstname, lastname, student_id, course, classification, profile_image FROM signin_db WHERE student_id = ?");
-$stmt->bind_param("s", $student_id);
-$stmt->execute();
-$result = $stmt->get_result();
-$student = $result->fetch_assoc();
-$stmt->close();
+// Check if student is irregular for either semester
+$isIrregular = checkIrregularStatus($conn, $student_id, 3, 1) || checkIrregularStatus($conn, $student_id, 3, 2);
 
-// Load courses based on student classification
-$courses = [];
-$studentClassification = strtolower($student['classification'] ?? 'regular');
-
-echo '<!-- Debug: Student classification: ' . htmlspecialchars($studentClassification) . ' -->';
-
-if ($studentClassification === 'irregular') {
-    // Load irregular courses for irregular students
-    echo '<!-- Loading irregular courses for third year -->';
+// Get irregular courses if any
+$irregularCourses = [];
+if ($isIrregular) {
     $irregularCourses = array_merge(
         getIrregularCourses($conn, $student_id, 3, 1),
         getIrregularCourses($conn, $student_id, 3, 2)
     );
     
-    // Organize irregular courses by semester
-    $courses = [
-        '3-1' => [],
-        '3-2' => []
-    ];
-    
+    // Add irregular courses to gradesByCode for display
     foreach ($irregularCourses as $course) {
-        $semesterKey = '3-' . ($course['semester'] ?? 1);
-        if (isset($courses[$semesterKey])) {
-            $courses[$semesterKey][] = $course;
-        }
-        
-        // Add irregular courses to gradesByCode for display
         $courseCode = strtoupper(trim($course['course_code']));
         if (!isset($gradesByCode[$courseCode])) {
             $gradesByCode[$courseCode] = [
@@ -191,16 +124,20 @@ if ($studentClassification === 'irregular') {
             ];
         }
     }
-} else {
-    // Load curriculum courses for regular students
-    echo '<!-- Loading curriculum courses for third year regular student -->';
-    $courses = getCurriculumCourses($conn, 'BSIT', 3);
 }
+$stmt = $conn->prepare("SELECT firstname, lastname, student_id, course, classification, profile_image FROM signin_db WHERE student_id = ?");
+$stmt->bind_param("s", $student_id);
+$stmt->execute();
+$result = $stmt->get_result();
+$student = $result->fetch_assoc();
+$stmt->close();
 
 // Initialize total units
 $totalUnits = 0;
-$first_sem_units = 0; // Initialize first semester units
-$second_sem_units = 0; // Initialize second semester units
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['student_id'])) {
+    header("Location: index.php");
+    exit();
+}
 
 // Initialize grades array
 $gradesByCode = [];
@@ -1046,7 +983,7 @@ function calculateYearlyUnits($courses) {
                     <i class="bi bi-book"></i> Fourth Year
                 </a>
             </li>
-            <li class="nav-item mb-2">
+              <li class="nav-item mb-2">
                 <a href="print_prospectus.php" class="nav-link text-white">
                     <i class="bi bi-printer"></i> Print Prospectus
                 </a>
@@ -1081,7 +1018,7 @@ function calculateYearlyUnits($courses) {
                     <div class="barcode-container d-inline-block">
                         <svg id="barcode" style="display: block; margin: 0 auto;"></svg>
                         <div class="barcode-text small mt-1">ID: <?php echo htmlspecialchars($student['student_id']); ?></div>
-                        <div class="prospectus-title fw-bold">PROSPECTUS</div>
+                        <div class="prospectus-title fw-bold">STUDY LOAD</div>
                     </div>
                     <script>
                         // Initialize barcode with student ID
@@ -1136,16 +1073,17 @@ function calculateYearlyUnits($courses) {
         
         <?php
         // Database connection for curriculum
-        $host = "localhost";
-        $user = "root";
-        $pass = "";
-        $db = "ccc_curriculum_evaluation";
+      session_start();
+$servername = "localhost";
+$username = "u220649928_public_html";
+$password = "RoZz_puGeCivic96Vti";
+$dbname = "u220649928_ccc_curriculum";
 
-        $conn = new mysqli($host, $user, $pass, $db);
-        if ($conn->connect_error) {
-            die("Connection failed: " . $conn->connect_error);
-        }
-        
+$conn = new mysqli($servername, $username, $password, $dbname);
+
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+}
         // Debug: Show database being used
         echo '<!-- Using database: ' . $db . ' -->';
         
@@ -1173,34 +1111,203 @@ function calculateYearlyUnits($courses) {
         
         echo '<!-- Using table: ' . $tableName . ' -->';
         
-        // Calculate total units for BSIT program - Third Year
+        // Calculate total units for BSIT program - First Year
         $totalProgramUnits = 0;
         $completedUnits = 0;
-        $first_sem_units = 0; // Reset for calculation
-        $second_sem_units = 0; // Reset for calculation
         
-        // Calculate units from the courses array (already loaded by classification)
-        foreach ($courses as $semesterKey => $semesterCourses) {
-            foreach ($semesterCourses as $course) {
-                $units = isset($course['total_units']) ? (float)$course['total_units'] : 0;
-                $totalProgramUnits += $units;
+        try {
+            // First, get all first year courses from irregular_db to calculate total units
+            $sql_columns = $conn->query("SHOW COLUMNS FROM `$tableName`");
+            $columns = [];
+            while($col = $sql_columns->fetch_assoc()) {
+                $columns[] = $col['Field'];
+            }
+            echo '<!-- Table columns: ' . implode(', ', $columns) . ' -->';
+            
+            // Build the query based on available columns for irregular_db
+            $selectFields = [];
+            
+            // Map irregular_db columns to expected field names
+            if (in_array('student_id', $columns)) $selectFields[] = 'student_id';
+            if (in_array('course_code', $columns)) $selectFields[] = 'course_code';
+            if (in_array('course_title', $columns)) $selectFields[] = 'course_title';
+            if (in_array('lec_units', $columns)) $selectFields[] = 'lec_units';
+            if (in_array('lab_units', $columns)) $selectFields[] = 'lab_units';
+            if (in_array('total_units', $columns)) $selectFields[] = 'total_units';
+            if (in_array('prerequisites', $columns)) $selectFields[] = 'prerequisites';
+            if (in_array('year_level', $columns)) $selectFields[] = 'year_level';
+            if (in_array('semester', $columns)) $selectFields[] = 'semester';
+            
+            if (empty($selectFields)) {
+                throw new Exception('No valid columns found in irregular_db table');
+            }
+            
+            // Get the current student ID from session
+            $studentId = $_SESSION['student_id'] ?? $_SESSION['user_id'] ?? '';
+            echo '<!-- Student ID from session: ' . htmlspecialchars($studentId) . ' -->';
+
+            // Get all third year first semester courses from irregular_db (3-1)
+            $whereClause = '';
+            if (in_array('year_level', $columns) && in_array('semester', $columns)) {
+                if (!empty($studentId)) {
+                    $whereClause = " WHERE student_id = '$studentId' AND year_level = 3 AND semester = 1";
+                } else {
+                    $whereClause = " WHERE year_level = 3 AND semester = 1";
+                }
+            }
+            
+            $sql = "SELECT " . implode(', ', $selectFields) . " 
+                    FROM `$tableName`" . 
+                    $whereClause . 
+                    " ORDER BY year_level, semester, course_code";
+            echo '<!-- Query: ' . htmlspecialchars($sql) . ' -->';
+            
+            $result = $conn->query($sql);
+            
+            if (!$result) {
+                throw new Exception('Query failed: ' . $conn->error);
+            }
+            
+            echo '<!-- Query returned ' . $result->num_rows . ' rows -->';
+            if ($result->num_rows > 0) {
+                while($row = $result->fetch_assoc()) {
+                    echo '<!-- Found: ' . htmlspecialchars($row['course_code']) . 
+                         ' (Year: ' . htmlspecialchars($row['year_level'] ?? 'N/A') . 
+                         ', Semester: ' . htmlspecialchars($row['semester'] ?? 'N/A') . ') -->';
+                }
+                $result->data_seek(0); // Reset the result pointer
+            }
+            
+            // Organize courses by semester for irregular_db
+            $courses = [
+                '3-1' => [],
+                '3-2' => []
+            ];
+            
+            // Initialize unit counters
+            $first_sem_units = 0;
+            $second_sem_units = 0;
+            
+            while ($row = $result->fetch_assoc()) {
+                // Use year_level and semester from irregular_db
+                $yearLevel = $row['year_level'] ?? 3;
+                $semester = $row['semester'] ?? 1;
+                $semesterKey = $yearLevel . '-' . $semester;
                 
-                // Add to semester-specific totals
+                $units = isset($row['total_units']) ? (float)$row['total_units'] : 0;
+                
+                // Ensure all required fields have default values
+                $courseData = [
+                    'course_code' => $row['course_code'] ?? '',
+                    'course_title' => $row['course_title'] ?? '',
+                    'lec_units' => $row['lec_units'] ?? 0,
+                    'lab_units' => $row['lab_units'] ?? 0,
+                    'total_units' => $units,
+                    'prerequisites' => $row['prerequisites'] ?? ''
+                ];
+                
                 if ($semesterKey === '3-1') {
                     $first_sem_units += $units;
                 } elseif ($semesterKey === '3-2') {
                     $second_sem_units += $units;
                 }
                 
+                // Only add to courses array if it's third year
+                if (isset($courses[$semesterKey])) {
+                    $courses[$semesterKey][] = $courseData;
+                }
+                
+                $totalProgramUnits += $units;
+
+                
+                
                 // Check if this course is completed
-                $subjectCode = trim(strtoupper($course['course_code']));
+                $subjectCode = trim(strtoupper($row['course_code']));
                 if (isset($gradesByCode[$subjectCode])) {
                     $completedUnits += $units;
+                    // Debug: Output each course being processed
+echo '<!-- Processing: ' . htmlspecialchars($row['course_code']) . ' (Semester: ' . $semester . ') -->';
+                }
+
+            }
+
+            // Now get second semester (3-2) courses separately
+            $secondSemWhereClause = '';
+            if (in_array('year_level', $columns) && in_array('semester', $columns)) {
+                if (!empty($studentId)) {
+                    $secondSemWhereClause = " WHERE student_id = '$studentId' AND year_level = 3 AND semester = 2";
+                } else {
+                    $secondSemWhereClause = " WHERE year_level = 3 AND semester = 2";
                 }
             }
+            
+            $secondSemSql = "SELECT " . implode(', ', $selectFields) . " 
+                           FROM `$tableName`" . 
+                           $secondSemWhereClause . 
+                           " ORDER BY year_level, semester, course_code";
+            
+            echo '<!-- Second Semester Query: ' . htmlspecialchars($secondSemSql) . ' -->';
+            
+            $secondSemResult = $conn->query($secondSemSql);
+            
+            if ($secondSemResult && $secondSemResult->num_rows > 0) {
+                while ($row = $secondSemResult->fetch_assoc()) {
+                    $yearLevel = $row['year_level'] ?? 3;
+                    $semester = $row['semester'] ?? 2;
+                    $semesterKey = $yearLevel . '-' . $semester;
+                    
+                    $units = isset($row['total_units']) ? (float)$row['total_units'] : 0;
+                    
+                    $courseData = [
+                        'course_code' => $row['course_code'] ?? '',
+                        'course_title' => $row['course_title'] ?? '',
+                        'lec_units' => $row['lec_units'] ?? 0,
+                        'lab_units' => $row['lab_units'] ?? 0,
+                        'total_units' => $units,
+                        'prerequisites' => $row['prerequisites'] ?? ''
+                    ];
+                    
+                    if ($semesterKey === '3-2') {
+                        $second_sem_units += $units;
+                        $courses['3-2'][] = $courseData;
+                        $totalProgramUnits += $units;
+                        
+                        // Check if this course is completed
+                        $subjectCode = trim(strtoupper($row['course_code']));
+                        if (isset($gradesByCode[$subjectCode])) {
+                            $completedUnits += $units;
+                        }
+                    }
+                }
+            }
+            
+            // Update session with total units
+            $_SESSION['total_units'] = $completedUnits;
+            
+        } catch (Exception $e) {
+            echo '<!-- Error: ' . htmlspecialchars($e->getMessage()) . ' -->';
+            // Fallback to empty arrays if there's an error
+            // Debug: Check what's in the courses array after fetching
+echo '<!-- Debug: Courses array after database query -->';
+echo '<!-- 3-1 Courses: ' . count($courses['3-1']) . ' found -->';
+foreach ($courses['3-1'] as $course) {
+    echo '<!-- 3-1 Course: ' . htmlspecialchars($course['course_code']) . ' -->';
+}
+echo '<!-- 3-2 Courses: ' . count($courses['3-2']) . ' found -->';
+foreach ($courses['3-2'] as $course) {
+    echo '<!-- 3-2 Course: ' . htmlspecialchars($course['course_code']) . ' -->';
+}
+            // Fallback to empty arrays if there's an error
+            $courses = [
+                '3-1' => [],
+                '3-2' => []
+            ];
+            $first_sem_units = 0;
+            $second_sem_units = 0;
+            $fourth_sem_units = 0;
         }
-        
         ?>
+
         <div class="year-title">THIRD YEAR</div>
         
         <div class="semester">
@@ -1221,16 +1328,12 @@ function calculateYearlyUnits($courses) {
                     <tbody>
                         <?php
                         $rowNum = 1;
-                        $displayedFirstSemUnits = 0; // Initialize displayed first semester units
                         // Track failed subjects from first semester so we can mark dependent second-semester courses
                         $failedFirstSem = [];
                         foreach ($courses['3-1'] as $course) {
                             $subjectCode = trim($course['course_code']);
                             $gradeInfo = $gradesByCode[strtoupper($subjectCode)] ?? null;
                             $grade = $gradeInfo['grade'] ?? '';
-                            
-                            // Add to displayed first semester units
-                            $displayedFirstSemUnits += $course['total_units'] ?? 0;
                             $gradeClass = 'grade-cell';
                             $displayGrade = '';
                             $hasGrade = !empty($grade);
@@ -1296,7 +1399,7 @@ function calculateYearlyUnits($courses) {
                 </table>
                 <div style="display: flex; justify-content: flex-end; align-items: center; margin: 20px 0; padding: 10px; background-color: #f8f9fa; border-radius: 5px; border-left: 4px solid #0d6efd;">
                     <span style="font-weight: bold; margin-right: 10px; font-size: 1.1em;">Total Units: </span>
-                    <span style="font-weight: bold; font-size: 1.2em; color: #0d6efd;"><?php echo number_format($displayedFirstSemUnits, 1); ?></span>
+                    <span style="font-weight: bold; font-size: 1.2em; color: #0d6efd;"><?php echo number_format($first_sem_units, 1); ?></span>
                 </div>
             </div>
         </div>
@@ -1379,7 +1482,7 @@ function calculateYearlyUnits($courses) {
                             
                             // Add to displayed courses if it passes all checks
                             $displayedCourses[] = $course;
-                            // Add the units of this course to the displayed second semester units
+                           // Add the units of this course to the displayed second semester units
                             $displayedSecondSemUnits += $course['total_units'] ?? 0;
                             $displayGrade = '-';
                             $hasGrade = !empty($grade);
@@ -1414,7 +1517,6 @@ function calculateYearlyUnits($courses) {
                             }
                             
                             // Check prerequisites: if any prerequisite was failed in first semester or not yet passed, block this course
-                            // BUT skip blocking for Regular students
                             $rowClass = '';
                             $prereqText = $course['prerequisites'] ?? '';
                             $studentClassification = strtoupper(trim($student['classification'] ?? ''));
@@ -1583,10 +1685,6 @@ function calculateYearlyUnits($courses) {
         echo '<div style="height:100%;width:' . $completionPercentage . '%;background:' . $decisionColor . ';transition:width 0.3s ease;"></div>';
         echo '</div></div>';
         
-        // Update session with total units
-        $_SESSION['total_units'] = $completedUnits;
-        $totalUnits = $completedUnits; // Update totalUnits for display
-        
         // Academic metrics
         echo '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:10px;margin-bottom:10px;">';
         echo '<div><strong>Average Grade:</strong> ' . ($averageGrade !== null ? number_format($averageGrade, 2) : 'N/A') . '</div>';
@@ -1603,47 +1701,37 @@ function calculateYearlyUnits($courses) {
         echo 'Total Subjects (year): ' . $totalSubjects . '<br/>';
         echo '</div>';
 
-        // Add Program Director section with e-signature
-        echo '<div class="program-director-section" style="margin-top:5px;text-align:center;page-break-inside:avoid;">';
-        echo '<div style="margin-top:2px;">';
-        echo '______________________________________';
-        echo '</div>';
-        
-        // Check for e-signature for 3rd year semesters (3-1 and 3-2)
-        $student_id = $studentData['student_id'] ?? '';
-        $signature_displayed = false;
-        
-        if (!empty($student_id)) {
-            // Check for 3rd year semesters signature
-            $sigQuery = "SELECT signature_filename FROM evaluation_signatures 
-                        WHERE student_id = ? AND year_semester IN ('3-1', '3-2') 
-                        ORDER BY evaluation_date DESC LIMIT 1";
-            $sigStmt = $conn->prepare($sigQuery);
-            if ($sigStmt) {
-                $sigStmt->bind_param('s', $student_id);
-                $sigStmt->execute();
-                $sigResult = $sigStmt->get_result();
-                if ($sigResult && $sigResult->num_rows > 0) {
-                    $sigRow = $sigResult->fetch_assoc();
-                    $signature_file = $sigRow['signature_filename'];
-                    
-                    if (!empty($signature_file) && file_exists("../adminpage/uploads/evaluation_signatures/" . $signature_file)) {
-                        echo '<div style="margin-top:5px;">';
-                        echo '<img src="../adminpage/uploads/evaluation_signatures/' . htmlspecialchars($signature_file) . 
-                             '" alt="Program Director Signature" style="max-height:40px;max-width:150px;">';
-                        echo '</div>';
-                        $signature_displayed = true;
-                    }
-                }
-                $sigStmt->close();
-            }
-        }
-        
-        echo '<div style="margin-top:2px;font-size:9px;">';
-        echo 'PROGRAM DIRECTOR';
-        echo '</div>';
-        echo '</div>';
+ // Check if student has any irregular courses
+$hasIrregularCourses = false;
+if (!empty($student_id)) {
+    $checkIrregular = $conn->prepare("
+        SELECT COUNT(*) as count 
+        FROM irregular_db 
+        WHERE student_id = ? 
+        AND year_semester IN ('3-1', '3-2')
+    ");
+    if ($checkIrregular) {
+        $checkIrregular->bind_param("s", $student_id);
+        $checkIrregular->execute();
+        $result = $checkIrregular->get_result();
+        $row = $result->fetch_assoc();
+        $hasIrregularCourses = ($row && $row['count'] > 0);
+        $checkIrregular->close();
+    }
+}
 
+// Only show signature if student has irregular courses
+if ($hasIrregularCourses) {
+    echo '<div class="program-director-section" style="margin-top:5px;text-align:center;page-break-inside:avoid;">';
+    echo '<div style="margin-top:2px;">';
+    echo '</div>';
+    echo '<div style="text-align: center; margin: 20px 0;">';
+    echo '<img src="signature.png" alt="Signature" style="max-width: 200px; height: auto; display: block; margin: 0 auto;">';
+    echo '______________________________________';
+    echo '</div>';
+    echo '<div style="margin-top:2px;font-size:9px;">PROGRAM DIRECTOR</div>';
+    echo '</div>';
+}
         // Close database connection
         $conn->close();
         ?>

@@ -214,7 +214,8 @@
             }
         </style>
         <?php
-        include 'db.php';
+        session_start();
+        require_once __DIR__ . '/../db_connect.php';
 
         // Function to format student ID as YYYY-XXXXX
         function formatStudentId($id) {
@@ -261,13 +262,13 @@
         $sql = "SELECT 
                     st.student_name as firstname,
                     '' as lastname,
-                    '' as email,
+                    st.email as email,
                     st.student_id,
                     st.programs as course,
                     st.classification,
                     'Student' as role_name,
                     st.curriculum,
-             
+                
                     st.fiscal_year,
                     'students_db' as source_table
                 FROM students_db st" . 

@@ -1,0 +1,54 @@
+[09-Sep-2025 07:02:12 Europe/Berlin] Starting dcipros1st.php
+[09-Sep-2025 07:02:12 Europe/Berlin] Session started. User ID: 5, Student ID: 2022-10873
+[09-Sep-2025 07:02:12 Europe/Berlin] Database connection successful
+[09-Sep-2025 07:02:12 Europe/Berlin] Student ID from session: 2022-10873
+[09-Sep-2025 07:02:12 Europe/Berlin] Preparing to fetch student data
+[09-Sep-2025 07:02:12 Europe/Berlin] Student data fetched successfully
+[09-Sep-2025 07:03:22 Europe/Berlin] Starting dcipros1st.php
+[09-Sep-2025 07:03:22 Europe/Berlin] Session started. User ID: 5, Student ID: 2022-10873
+[09-Sep-2025 07:03:22 Europe/Berlin] Database connection successful
+[09-Sep-2025 07:03:22 Europe/Berlin] Student ID from session: 2022-10873
+[09-Sep-2025 07:03:22 Europe/Berlin] Preparing to fetch student data
+[09-Sep-2025 07:03:22 Europe/Berlin] Student data fetched successfully
+[09-Sep-2025 07:03:22 Europe/Berlin] Checking if grades_db table exists
+[09-Sep-2025 07:03:22 Europe/Berlin] grades_db table exists
+[09-Sep-2025 07:03:22 Europe/Berlin] Getting column information for grades_db
+[09-Sep-2025 07:03:22 Europe/Berlin] Table columns: id, student_id, course_code, year, sem, final_grade, course_title, created_at, updated_at
+[09-Sep-2025 07:03:22 Europe/Berlin] Preparing query: SELECT * FROM grades_db WHERE student_id = ?
+[09-Sep-2025 07:03:22 Europe/Berlin] Parameters: Array
+(
+    [0] => 2022-10873
+)
+
+[09-Sep-2025 07:03:31 Europe/Berlin] Starting dcipros1st.php
+[09-Sep-2025 07:03:31 Europe/Berlin] Session started. User ID: 5, Student ID: 2022-10873
+[09-Sep-2025 07:03:31 Europe/Berlin] Database connection successful
+[09-Sep-2025 07:03:31 Europe/Berlin] Student ID from session: 2022-10873
+[09-Sep-2025 07:03:31 Europe/Berlin] Preparing to fetch student data
+[09-Sep-2025 07:03:31 Europe/Berlin] Student data fetched successfully
+[09-Sep-2025 07:03:31 Europe/Berlin] Checking if grades_db table exists
+[09-Sep-2025 07:03:31 Europe/Berlin] grades_db table exists
+[09-Sep-2025 07:03:31 Europe/Berlin] Getting column information for grades_db
+[09-Sep-2025 07:03:31 Europe/Berlin] Table columns: id, student_id, course_code, year, sem, final_grade, course_title, created_at, updated_at
+[09-Sep-2025 07:03:31 Europe/Berlin] Preparing query: SELECT * FROM grades_db WHERE student_id = ?
+[09-Sep-2025 07:03:31 Europe/Berlin] Parameters: Array
+(
+    [0] => 2022-10873
+)
+
+[09-Sep-2025 07:04:49 Europe/Berlin] Starting dcipros1st.php
+[09-Sep-2025 07:04:49 Europe/Berlin] Session started. User ID: 5, Student ID: 2022-10873
+[09-Sep-2025 07:04:49 Europe/Berlin] Database connection successful
+[09-Sep-2025 07:04:49 Europe/Berlin] Student ID from session: 2022-10873
+[09-Sep-2025 07:04:49 Europe/Berlin] Preparing to fetch student data
+[09-Sep-2025 07:04:49 Europe/Berlin] Student data fetched successfully
+[09-Sep-2025 07:04:49 Europe/Berlin] Checking if grades_db table exists
+[09-Sep-2025 07:04:49 Europe/Berlin] grades_db table exists
+[09-Sep-2025 07:04:49 Europe/Berlin] Getting column information for grades_db
+[09-Sep-2025 07:04:49 Europe/Berlin] Table columns: id, student_id, course_code, year, sem, final_grade, course_title, created_at, updated_at
+[09-Sep-2025 07:04:49 Europe/Berlin] Preparing query: SELECT * FROM grades_db WHERE student_id = ?
+[09-Sep-2025 07:04:49 Europe/Berlin] Parameters: Array
+(
+    [0] => 2022-10873
+)
+

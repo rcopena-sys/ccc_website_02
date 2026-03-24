@@ -1,18 +1,6 @@
 <?php
-// Database connection
-$servername = "localhost";
-$username = "root";
-$password = "";
-$dbname = "ccc_curriculum_evaluation";
-
-// Create connection
-$conn = new mysqli($servername, $username, $password, $dbname);
-
-// Check connection
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
-
+session_start();
+require_once __DIR__ . '/../db_connect.php';
 // Create table if not exists
 $sql = "CREATE TABLE IF NOT EXISTS calendar (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -420,9 +408,9 @@ if ($result->num_rows > 0) {
             <div class="label">DEAN</div>
             <a href="dashboard2.php" class="nav-link">Dashboard</a>
             <a href="list.php" class="nav-link">Student List</a>
-            <a href="feedback.php" class="nav-link">Feedback</a>
+           <!-- <a href="feedback.php" class="nav-link">Feedback</a> -->
             <a href="calendean.php" class="nav-link active">Calendar of Events</a>
-         
+           
         </div>
         <div class="content">
             <div class="calendar-container" style="display: flex; flex-direction: column; align-items: center;">
