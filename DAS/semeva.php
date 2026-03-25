@@ -8,7 +8,7 @@ $selected_semester = '';
 $semesters = [];
 $grades_for_semester = [];
 $error_message = '';
-$program = ''; // Will store BSIT or BSCS
+$program = ''; // Will store BSA or BSAIS
 
 // Function to check if a column exists in a table
 function columnExists($conn, $table, $column) {
@@ -34,8 +34,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $student_info = null;
     $error_message = '';
 
-    // 1) Try Psychology students in students_db first
-    $stmt = $conn->prepare("SELECT * FROM students_db WHERE student_id = ? AND programs LIKE '%Psychology%'");
+    // 1) Try to find the student in students_db first
+    $stmt = $conn->prepare("SELECT * FROM students_db WHERE student_id = ?");
     if ($stmt) {
         $stmt->bind_param('s', $student_id);
         $stmt->execute();
@@ -103,16 +103,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // 3) Enforce Psychology-only and, if valid, load semester data
+    // 3) Enforce BSA/BSAIS-only and, if valid, load semester data
     if ($student_info && $error_message === '') {
         $program_field = strtoupper(trim($student_info['programs'] ?? $student_info['program'] ?? ''));
-        if (strpos($program_field, 'PSYCHOLOGY') !== false) {
-            $program = 'Psychology';
+
+        // Detect BSAIS and BSA variants
+        $isBSAIS = (strpos($program_field, 'BSAIS') !== false);
+        $isBSA = (!$isBSAIS && strpos($program_field, 'BSA') !== false);
+
+        if ($isBSAIS) {
+            $program = 'BSAIS';
+        } elseif ($isBSA) {
+            $program = 'BSA';
         } else {
-            $error_message = "This page is for Psychology students only. The student ID '{$student_id}' is not enrolled in Psychology.";
+            $error_message = "This page is for BSA / BSAIS students only. The student ID '{$student_id}' is not enrolled in BSA or BSAIS.";
         }
 
-        if ($program === 'Psychology' && $error_message === '') {
+        if ($program !== '' && $error_message === '') {
             // Generate year-level based semester options (1-1 to 4-2)
             $semesters = [];
             for ($year = 1; $year <= 4; $year++) {

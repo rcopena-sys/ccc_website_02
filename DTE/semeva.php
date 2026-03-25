@@ -8,7 +8,7 @@ $selected_semester = '';
 $semesters = [];
 $grades_for_semester = [];
 $error_message = '';
-$program = ''; // Will store BSIT or BSCS
+$program = ''; // Will store Teacher Education program
 
 // Function to check if a column exists in a table
 function columnExists($conn, $table, $column) {
@@ -98,7 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     
     if ($student_info) {
-            // Determine program from student info (support TE programs and BSIT/BSCS)
+            // Determine program from student info (support Teacher Education programs only)
             $programRawField = trim($student_info['programs'] ?? $student_info['program'] ?? '');
             $program_field = strtoupper($programRawField);
             if (strpos($program_field, 'BACHELOR OF ELEMENTARY EDUCATION') !== false) {
@@ -109,41 +109,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $program = 'Bachelor Of Secondary Education Major In Mathematics';
             } elseif (strpos($program_field, 'BACHELOR OF SECONDARY EDUCATION MAJOR IN SCIENCE') !== false) {
                 $program = 'Bachelor Of Secondary Education Major In Science';
-            } elseif (strpos($program_field, 'BSIT') !== false) {
-                $program = 'BSIT';
-            } elseif (strpos($program_field, 'BSCS') !== false) {
-                $program = 'BSCS';
             } else {
-                // Leave empty if not clearly identified
+                // Leave as empty/non-TE if not clearly identified
                 $program = '';
             }
-            
-            // Generate year-level based semester options (1-1 to 4-2)
-            $semesters = [];
-            for ($year = 1; $year <= 4; $year++) {
-                for ($sem = 1; $sem <= 2; $sem++) {
-                    $semesters[] = "$year-$sem";
+
+            // Only allow these Teacher Education programs on this page
+            $allowedPrograms = [
+                'Bachelor Of Elementary Education',
+                'Bachelor Of Secondary Education Major In English',
+                'Bachelor Of Secondary Education Major In Mathematics',
+                'Bachelor Of Secondary Education Major In Science',
+            ];
+
+            if (!in_array($program, $allowedPrograms, true)) {
+                // Block non-Teacher Education programs
+                $error_message = "This page is only for Teacher Education programs (BEEd and BSE majors in English, Mathematics, and Science).";
+                $student_info = null;
+                $semesters = [];
+                $grades_for_semester = [];
+            } else {
+                // Generate year-level based semester options (1-1 to 4-2)
+                $semesters = [];
+                for ($year = 1; $year <= 4; $year++) {
+                    for ($sem = 1; $sem <= 2; $sem++) {
+                        $semesters[] = "$year-$sem";
+                    }
                 }
-            }
 
-            // Default to first semester if none selected
-            if ($selected_semester === '' && !empty($semesters)) {
-                $selected_semester = $semesters[0];
-            }
+                // Default to first semester if none selected
+                if ($selected_semester === '' && !empty($semesters)) {
+                    $selected_semester = $semesters[0];
+                }
 
-            if ($selected_semester !== '') {
-                // Parse the year and semester from the selected value (format: 'YEAR-SEM')
-                $parts = explode('-', $selected_semester, 2);
-                $ySel = $parts[0] ?? '';  // Year level (1-4)
-                $sSel = $parts[1] ?? '';  // Semester (1-2)
-                
-                // For grades_db, year and sem are stored as simple numbers/strings like '1' and '1'
-                $dbYear = $ySel;
-                $dbSem = $sSel;
+                if ($selected_semester !== '') {
+                    // Parse the year and semester from the selected value (format: 'YEAR-SEM')
+                    $parts = explode('-', $selected_semester, 2);
+                    $ySel = $parts[0] ?? '';  // Year level (1-4)
+                    $sSel = $parts[1] ?? '';  // Semester (1-2)
+                    
+                    // For grades_db, year and sem are stored as simple numbers/strings like '1' and '1'
+                    $dbYear = $ySel;
+                    $dbSem = $sSel;
 
-                // Build the query to get courses for the selected semester
-                // Use a completely different approach - process data in PHP to ensure single entries
-                $curriculumQuery = "
+                    // Build the query to get courses for the selected semester
+                    // Use a completely different approach - process data in PHP to ensure single entries
+                    $curriculumQuery = "
                     -- Get all courses from grades_db (will deduplicate in PHP)
                     SELECT 
                         CONVERT(g.course_code USING utf8mb4) COLLATE utf8mb4_unicode_ci AS course_code,
@@ -180,69 +191,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                       AND i.status = 'active'
                 ";
 
-                $curriculumQuery .= " ORDER BY TRIM(course_code)";
-                
-                // Prepare the statement
-                $stmt2 = $conn->prepare($curriculumQuery);
-                if ($stmt2) {
-                    // Set up parameters for both SELECT statements
-                    $paramTypes = 'ssssss';  // grades_db: student_id, year, sem + irregular_db: student_id, year_level, semester
-                    $params = [ $student_id, $dbYear, $dbSem, $student_id, $ySel, $sSel ];
+                    $curriculumQuery .= " ORDER BY TRIM(course_code)";
                     
-                    // Bind parameters (spread)
-                    $stmt2->bind_param($paramTypes, ...$params);
-                    
-                    // Execute the query
-                    if ($stmt2->execute()) {
-                        $result = $stmt2->get_result();
-                        if ($result) {
-                            $all_courses = $result->fetch_all(MYSQLI_ASSOC);
-                            
-                            // Deduplicate courses in PHP - prioritize grades over irregular
-                            $unique_courses = [];
-                            foreach ($all_courses as $course) {
-                                $course_code = trim($course['course_code'] ?? '');
+                    // Prepare the statement
+                    $stmt2 = $conn->prepare($curriculumQuery);
+                    if ($stmt2) {
+                        // Set up parameters for both SELECT statements
+                        $paramTypes = 'ssssss';  // grades_db: student_id, year, sem + irregular_db: student_id, year_level, semester
+                        $params = [ $student_id, $dbYear, $dbSem, $student_id, $ySel, $sSel ];
+                        
+                        // Bind parameters (spread)
+                        $stmt2->bind_param($paramTypes, ...$params);
+                        
+                        // Execute the query
+                        if ($stmt2->execute()) {
+                            $result = $stmt2->get_result();
+                            if ($result) {
+                                $all_courses = $result->fetch_all(MYSQLI_ASSOC);
                                 
-                                // If course already exists, keep the grade version (higher priority)
-                                if (isset($unique_courses[$course_code])) {
-                                    // Keep existing if it's a grade, replace if current is grade and existing is irregular
-                                    if ($course['source_type'] === 'grade' && $unique_courses[$course_code]['source_type'] === 'irregular') {
+                                // Deduplicate courses in PHP - prioritize grades over irregular
+                                $unique_courses = [];
+                                foreach ($all_courses as $course) {
+                                    $course_code = trim($course['course_code'] ?? '');
+                                    
+                                    // If course already exists, keep the grade version (higher priority)
+                                    if (isset($unique_courses[$course_code])) {
+                                        // Keep existing if it's a grade, replace if current is grade and existing is irregular
+                                        if ($course['source_type'] === 'grade' && $unique_courses[$course_code]['source_type'] === 'irregular') {
+                                            $unique_courses[$course_code] = $course;
+                                        }
+                                        // If both are same type, keep the first one
+                                    } else {
                                         $unique_courses[$course_code] = $course;
                                     }
-                                    // If both are same type, keep the first one
-                                } else {
-                                    $unique_courses[$course_code] = $course;
                                 }
-                            }
-                            
-                            // Convert back to indexed array
-                            $grades_for_semester = array_values($unique_courses);
+                                
+                                // Convert back to indexed array
+                                $grades_for_semester = array_values($unique_courses);
 
-                            // Debug (uncomment for server logs)
-                            // error_log("Student: $student_id, Year: $dbYear, Sem: $dbSem");
-                            // error_log("Found " . count($all_courses) . " total courses, " . count($grades_for_semester) . " unique courses");
-                            
-                            if (empty($grades_for_semester)) {
-                                // Try to show all courses for this student for debugging
-                                $debugQuery = "SELECT TRIM(student_id) AS sid, course_code, year, sem, final_grade FROM grades_db WHERE TRIM(student_id) = ?";
-                                $debugStmt = $conn->prepare($debugQuery);
-                                if ($debugStmt) {
-                                    $debugStmt->bind_param('s', $student_id);
-                                    $debugStmt->execute();
-                                    $allCourses = $debugStmt->get_result()->fetch_all(MYSQLI_ASSOC);
-                                    // error_log("All courses for student: " . print_r($allCourses, true));
-                                    $debugStmt->close();
+                                // Debug (uncomment for server logs)
+                                // error_log("Student: $student_id, Year: $dbYear, Sem: $dbSem");
+                                // error_log("Found " . count($all_courses) . " total courses, " . count($grades_for_semester) . " unique courses");
+                                
+                                if (empty($grades_for_semester)) {
+                                    // Try to show all courses for this student for debugging
+                                    $debugQuery = "SELECT TRIM(student_id) AS sid, course_code, year, sem, final_grade FROM grades_db WHERE TRIM(student_id) = ?";
+                                    $debugStmt = $conn->prepare($debugQuery);
+                                    if ($debugStmt) {
+                                        $debugStmt->bind_param('s', $student_id);
+                                        $debugStmt->execute();
+                                        $allCourses = $debugStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                                        // error_log("All courses for student: " . print_r($allCourses, true));
+                                        $debugStmt->close();
+                                    }
                                 }
+                            } else {
+                                $error_message = 'Failed to get result set: ' . $stmt2->error;
                             }
                         } else {
-                            $error_message = 'Failed to get result set: ' . $stmt2->error;
+                            $error_message = 'Failed to execute query: ' . $stmt2->error;
                         }
+                        $stmt2->close();
                     } else {
-                        $error_message = 'Failed to execute query: ' . $stmt2->error;
+                        $error_message = 'Failed to prepare query: ' . $conn->error;
                     }
-                    $stmt2->close();
-                } else {
-                    $error_message = 'Failed to prepare query: ' . $conn->error;
                 }
             }
     }

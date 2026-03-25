@@ -869,6 +869,7 @@ $program = trim($_GET['program'] ?? $_POST['program'] ?? '');
 $fiscalYear = trim($_GET['fiscal_year'] ?? $_POST['fiscal_year'] ?? '');
 
 $student = null;
+$blockedProgram = false; // true when student exists but is not BSA/BSAIS
 if ($studentId !== '') {
     if (columnExists($conn, 'signin_db', 'student_id')) {
         // First, get the column names from the signin_db table
@@ -1012,23 +1013,31 @@ if (empty($program) && !empty($studentId)) {
     }
 }
 
-// Check for program in various formats and normalize (Psychology-only for DAS)
+// Normalize program for strict BSA/BSAIS evaluation
 $rawProgram = trim($program);
-$upperProgram = strtoupper($rawProgram);
+// Remove spaces and special characters so we can match exact codes
+$normalizedProgram = strtoupper(preg_replace('/[^A-Z0-9]/', '', $rawProgram));
 
-// Flag if this student is Psychology
-$isPsychologyStudent = (strpos($upperProgram, 'PSYCHOLOGY') !== false);
+// Detect ONLY exact BSA or BSAIS, nothing else
+$isBSAIS = ($normalizedProgram === 'BSAIS');
+$isBSA = ($normalizedProgram === 'BSA');
 
-if ($isPsychologyStudent) {
-    // Normalize all Psychology variants to a single label
-    $program = 'Psychology';
+// Flag eligible programs
+$isEligibleProgram = $isBSAIS || $isBSA;
+
+// Normalize display program label
+if ($isBSAIS) {
+  $program = 'BSAIS';
+} elseif ($isBSA) {
+  $program = 'BSA';
 } else {
-    // Not Psychology – leave program as-is for logging, but block later
-    error_log("Warning: Non-Psychology or unknown program for student $studentId. Raw value: " . ($rawProgram ?: 'empty'));
+  // Non-BSA/BSAIS – mark as blocked and log
+  $blockedProgram = ($studentId !== '' && $student !== null);
+  error_log("Warning: Non-BSA/BSAIS or unknown program for student $studentId. Raw value: " . ($rawProgram ?: 'empty') . ", normalized: " . ($normalizedProgram ?: 'empty'));
 }
 
 // Debug: Log the detected program
-error_log("Final program detected for student $studentId: '" . ($program ?: 'UNKNOWN') . "', isPsychology=" . ($isPsychologyStudent ? 'true' : 'false'));
+error_log("Final program detected for student $studentId: '" . ($program ?: 'UNKNOWN') . "', normalized='" . $normalizedProgram . "', eligible=" . ($isEligibleProgram ? 'true' : 'false') . ", blockedProgram=" . ($blockedProgram ? 'true' : 'false'));
 
 if ($fiscalYear === '') {
     $fy = latestFiscalYear($conn, $program);
@@ -1234,50 +1243,36 @@ if ($studentId !== '') {
 
 $ysOrder = ['1-1','1-2','2-1','2-2','3-1','3-2','4-1','4-2'];
 
-// Define unit limits for each semester and course
-$unitLimits = [
-    'BSIT' => [
-        '1-1' => ['max' => 26, 'label' => 'FIRST YEAR • FIRST SEMESTER'],
-        '1-2' => ['max' => 26, 'label' => 'FIRST YEAR • SECOND SEMESTER'],
-        '2-1' => ['max' => 26, 'label' => 'SECOND YEAR • FIRST SEMESTER'],
-        '2-2' => ['max' => 23, 'label' => 'SECOND YEAR • SECOND SEMESTER'],
-        '3-1' => ['max' => 24, 'label' => 'THIRD YEAR • FIRST SEMESTER'],
-        '3-2' => ['max' => 12, 'label' => 'THIRD YEAR • SECOND SEMESTER'],
-        '4-1' => ['max' => 6,  'label' => 'FOURTH YEAR • FIRST SEMESTER'],
-        '4-2' => ['max' => 6,  'label' => 'FOURTH YEAR • SECOND SEMESTER']
-    ],
-    'BSCS' => [
-        '1-1' => ['max' => 26, 'label' => 'FIRST YEAR • FIRST SEMESTER'],
-        '1-2' => ['max' => 26, 'label' => 'FIRST YEAR • SECOND SEMESTER'],
-        '2-1' => ['max' => 26, 'label' => 'SECOND YEAR • FIRST SEMESTER'],
-        '2-2' => ['max' => 26, 'label' => 'SECOND YEAR • SECOND SEMESTER'],
-        '3-1' => ['max' => 24, 'label' => 'THIRD YEAR • FIRST SEMESTER'],
-        '3-2' => ['max' => 13, 'label' => 'THIRD YEAR • SECOND SEMESTER'],
-        '4-1' => ['max' => 6,  'label' => 'FOURTH YEAR • FIRST SEMESTER'],
-        '4-2' => ['max' => 6,  'label' => 'FOURTH YEAR • SECOND SEMESTER']
-    ]
-];
-
-// Use the unit limits for labels if available, otherwise fallback to default
-$labels = [];
+// Dynamically compute the maximum units per semester from the curriculum table
+// instead of using hardcoded values. This sums all subject units in each
+// semester, so the denominator (e.g. 24.0 / 26) always matches the actual
+// curriculum in the database.
+$maxUnitsPerSemester = [];
 foreach ($ysOrder as $ys) {
-    if (isset($unitLimits[$program][$ys])) {
-        $labels[$ys] = $unitLimits[$program][$ys]['label'];
-    } else {
-        // Fallback labels
-        $defaultLabels = [
-            '1-1' => 'FIRST YEAR • FIRST SEMESTER',
-            '1-2' => 'FIRST YEAR • SECOND SEMESTER', 
-            '2-1' => 'SECOND YEAR • FIRST SEMESTER',
-            '2-2' => 'SECOND YEAR • SECOND SEMESTER',
-            '3-1' => 'THIRD YEAR • FIRST SEMESTER',
-            '3-2' => 'THIRD YEAR • SECOND SEMESTER',
-            '4-1' => 'FOURTH YEAR • FIRST SEMESTER',
-            '4-2' => 'FOURTH YEAR • SECOND SEMESTER'
-        ];
-        $labels[$ys] = $defaultLabels[$ys] ?? $ys;
+  $total = 0.0;
+  if (isset($curriculum[$ys])) {
+    foreach ($curriculum[$ys] as $course) {
+      // Prefer explicit total units; fall back to lec+lab if needed
+      $units = isset($course['units']) && $course['units'] !== ''
+        ? (float)$course['units']
+        : ((float)($course['lec'] ?? 0) + (float)($course['lab'] ?? 0));
+      $total += $units;
     }
+  }
+  $maxUnitsPerSemester[$ys] = $total;
 }
+
+// Static labels stay the same per semester
+$labels = [
+  '1-1' => 'FIRST YEAR • FIRST SEMESTER',
+  '1-2' => 'FIRST YEAR • SECOND SEMESTER', 
+  '2-1' => 'SECOND YEAR • FIRST SEMESTER',
+  '2-2' => 'SECOND YEAR • SECOND SEMESTER',
+  '3-1' => 'THIRD YEAR • FIRST SEMESTER',
+  '3-2' => 'THIRD YEAR • SECOND SEMESTER',
+  '4-1' => 'FOURTH YEAR • FIRST SEMESTER',
+  '4-2' => 'FOURTH YEAR • SECOND SEMESTER'
+];
 
 ?>
 <!DOCTYPE html>
@@ -1642,9 +1637,8 @@ foreach ($ysOrder as $ys) {
       <div class="col-sm-3">
         <label class="form-label">Program</label>
         <select name="program" class="form-select">
-          <option value="Psychology" <?= $program==='Psychology'?'selected':'' ?>>Psychology</option>
-          <option value="BSCS" <?= $program==='BSCS'?'selected':'' ?>>BSCS</option>
-          <option value="BSIT" <?= $program==='BSIT'?'selected':'' ?>>BSIT</option>
+          <option value="BSA" <?= $program==='BSA'?'selected':'' ?>>BSA</option>
+          <option value="BSAIS" <?= $program==='BSAIS'?'selected':'' ?>>BSAIS</option>
         </select>
       </div>
       <?php if (columnExists($conn, 'curriculum', 'fiscal_year')): ?>
@@ -1659,7 +1653,7 @@ foreach ($ysOrder as $ys) {
     </form>
   </div>
 
-<?php if ($student && $program === 'Psychology'): 
+<?php if ($student && $isEligibleProgram): 
   // Calculate grand total of all units for the header
   $grandTotalUnits = 0;
   if (isset($ysOrder) && isset($curriculum)) {
@@ -1989,11 +1983,12 @@ foreach ($ysOrder as $ys) {
             }
         }
         
-        // Total units = graded curriculum units + graded irregular units
+        // Total units passed this semester = graded curriculum units + graded irregular units
         $semesterUnits = $gradedUnits + $irregularUnitsForTotal;
         
-        // Get unit limit for this semester and program
-        $maxUnits = isset($unitLimits[$program][$ysKey]) ? $unitLimits[$program][$ysKey]['max'] : 26; // Default to 26 if not set
+        // Max units for this semester come directly from the curriculum
+        // (sum of all subject units in that semester), not hardcoded.
+        $maxUnits = isset($maxUnitsPerSemester[$ysKey]) ? $maxUnitsPerSemester[$ysKey] : 0;
         $isOverLimit = $semesterUnits > $maxUnits;
     ?>
   <div class="mb-4 <?= $isOverLimit ? 'unit-overlimit unit-limit-warning' : '' ?>" data-ys="<?= htmlspecialchars($ysKey) ?>">
@@ -2619,8 +2614,8 @@ if (!empty($curriculum)) {
     </div>
     <div class="page-number"></div>
   </div>
-<?php elseif ($student && $program !== 'Psychology'): ?>
-  <div class="container"><div class="alert alert-danger">This evaluation page is for Psychology students only. The student ID <?= htmlspecialchars($studentId) ?> is not enrolled in Psychology.</div></div>
+<?php elseif ($blockedProgram): ?>
+  <div class="container"><div class="alert alert-warning">No student found for ID: <?= htmlspecialchars($studentId) ?>.</div></div>
 <?php elseif ($studentId !== ''): ?>
   <div class="container"><div class="alert alert-warning">No student found for ID: <?= htmlspecialchars($studentId) ?>.</div></div>
 <?php else: ?>

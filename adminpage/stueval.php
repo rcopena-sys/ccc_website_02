@@ -1231,49 +1231,23 @@ if ($studentId !== '') {
 
 $ysOrder = ['1-1','1-2','2-1','2-2','3-1','3-2','4-1','4-2'];
 
-// Define unit limits for each semester and course
-$unitLimits = [
-    'BSIT' => [
-        '1-1' => ['max' => 26, 'label' => 'FIRST YEAR • FIRST SEMESTER'],
-        '1-2' => ['max' => 26, 'label' => 'FIRST YEAR • SECOND SEMESTER'],
-        '2-1' => ['max' => 26, 'label' => 'SECOND YEAR • FIRST SEMESTER'],
-        '2-2' => ['max' => 23, 'label' => 'SECOND YEAR • SECOND SEMESTER'],
-        '3-1' => ['max' => 24, 'label' => 'THIRD YEAR • FIRST SEMESTER'],
-        '3-2' => ['max' => 12, 'label' => 'THIRD YEAR • SECOND SEMESTER'],
-        '4-1' => ['max' => 6,  'label' => 'FOURTH YEAR • FIRST SEMESTER'],
-        '4-2' => ['max' => 6,  'label' => 'FOURTH YEAR • SECOND SEMESTER']
-    ],
-    'BSCS' => [
-        '1-1' => ['max' => 26, 'label' => 'FIRST YEAR • FIRST SEMESTER'],
-        '1-2' => ['max' => 26, 'label' => 'FIRST YEAR • SECOND SEMESTER'],
-        '2-1' => ['max' => 26, 'label' => 'SECOND YEAR • FIRST SEMESTER'],
-        '2-2' => ['max' => 26, 'label' => 'SECOND YEAR • SECOND SEMESTER'],
-        '3-1' => ['max' => 24, 'label' => 'THIRD YEAR • FIRST SEMESTER'],
-        '3-2' => ['max' => 13, 'label' => 'THIRD YEAR • SECOND SEMESTER'],
-        '4-1' => ['max' => 6,  'label' => 'FOURTH YEAR • FIRST SEMESTER'],
-        '4-2' => ['max' => 6,  'label' => 'FOURTH YEAR • SECOND SEMESTER']
-    ]
-];
-
-// Use the unit limits for labels if available, otherwise fallback to default
-$labels = [];
+// Dynamically compute the maximum units per semester from the curriculum table
+// instead of using hardcoded values. This sums all subject units in each
+// semester, so the denominator (e.g. 24.0 / 26) always matches the actual
+// curriculum in the database.
+$maxUnitsPerSemester = [];
 foreach ($ysOrder as $ys) {
-    if (isset($unitLimits[$program][$ys])) {
-        $labels[$ys] = $unitLimits[$program][$ys]['label'];
-    } else {
-        // Fallback labels
-        $defaultLabels = [
-            '1-1' => 'FIRST YEAR • FIRST SEMESTER',
-            '1-2' => 'FIRST YEAR • SECOND SEMESTER', 
-            '2-1' => 'SECOND YEAR • FIRST SEMESTER',
-            '2-2' => 'SECOND YEAR • SECOND SEMESTER',
-            '3-1' => 'THIRD YEAR • FIRST SEMESTER',
-            '3-2' => 'THIRD YEAR • SECOND SEMESTER',
-            '4-1' => 'FOURTH YEAR • FIRST SEMESTER',
-            '4-2' => 'FOURTH YEAR • SECOND SEMESTER'
-        ];
-        $labels[$ys] = $defaultLabels[$ys] ?? $ys;
+  $total = 0.0;
+  if (isset($curriculum[$ys])) {
+    foreach ($curriculum[$ys] as $course) {
+      // Prefer explicit total units; fall back to lec+lab if needed
+      $units = isset($course['units']) && $course['units'] !== ''
+        ? (float)$course['units']
+        : ((float)($course['lec'] ?? 0) + (float)($course['lab'] ?? 0));
+      $total += $units;
     }
+  }
+  $maxUnitsPerSemester[$ys] = $total;
 }
 
 ?>
@@ -1985,11 +1959,12 @@ foreach ($ysOrder as $ys) {
             }
         }
         
-        // Total units = graded curriculum units + graded irregular units
+        // Total units passed this semester = graded curriculum units + graded irregular units
         $semesterUnits = $gradedUnits + $irregularUnitsForTotal;
         
-        // Get unit limit for this semester and program
-        $maxUnits = isset($unitLimits[$program][$ysKey]) ? $unitLimits[$program][$ysKey]['max'] : 26; // Default to 26 if not set
+        // Max units for this semester come directly from the curriculum
+        // (sum of all subject units in that semester), not hardcoded.
+        $maxUnits = isset($maxUnitsPerSemester[$ysKey]) ? $maxUnitsPerSemester[$ysKey] : 0;
         $isOverLimit = $semesterUnits > $maxUnits;
     ?>
   <div class="mb-4 <?= $isOverLimit ? 'unit-overlimit unit-limit-warning' : '' ?>" data-ys="<?= htmlspecialchars($ysKey) ?>">

@@ -3,12 +3,13 @@ session_start();
 
 // Check if user is logged in and is an admin (role_id = 2, 10, or 11)
 if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role_id'], [2, 10, 11])) {
-    header("Location: ../index.php");
-    exit();
+  header("Location: ../index.php");
+  exit();
 }
 
 
 require_once '../db_connect.php';
+/** @var mysqli $conn */
 
 // Get unread count (NOW USING HOSTINGER CONNECTION)
 $unread_count = 0;
@@ -40,6 +41,7 @@ $user = [
 
 // Fetch user info
 $user_id = $_SESSION['user_id'];
+/** @var mysqli_stmt|false $stmt */
 $stmt = $conn->prepare("SELECT firstname, lastname, email, profile_image FROM signin_db WHERE id = ?");
 $stmt->bind_param("i", $user_id);
 $stmt->execute();
@@ -285,20 +287,31 @@ while ($row = $res->fetch_assoc()) {
     $programs[$row['programs']] = $row['total'];
 }
 
-// Get year-level and classification breakdown
+// Get year-level and classification breakdown (using academic_year column)
 $year_levels = ['1st', '2nd', '3rd', '4th'];
 $year_level_data = [];
+// Map display labels to stored academic_year values
+$year_value_map = [
+  '1st' => '1',
+  '2nd' => '2',
+  '3rd' => '3',
+  '4th' => '4',
+];
+
 foreach ($year_levels as $level) {
-    $year_level_data[$level] = ['Regular' => 0, 'Irregular' => 0];
-    $res = $conn->query("SELECT classification, COUNT(*) as total FROM students_db " . ($where_clause ? $where_clause . " AND programs = 'BSIT'" : " WHERE programs = 'BSIT'") . " GROUP BY classification");
-    if ($res) {
-        while ($row = $res->fetch_assoc()) {
-            $classification = ucfirst(strtolower($row['classification'] ?? ''));
-            if (isset($year_level_data[$level][$classification])) {
-                $year_level_data[$level][$classification] = (int)$row['total'];
-            }
-        }
+  $year_level_data[$level] = ['Regular' => 0, 'Irregular' => 0];
+  $dbYearValue = $conn->real_escape_string($year_value_map[$level] ?? $level);
+  // Use the same Teacher Education program filter and break down by academic_year
+  $yearLevelWhere = $teWhere . " AND academic_year = '" . $dbYearValue . "'";
+  $res = $conn->query("SELECT classification, COUNT(*) as total FROM students_db" . $yearLevelWhere . " GROUP BY classification");
+  if ($res) {
+    while ($row = $res->fetch_assoc()) {
+      $classification = ucfirst(strtolower($row['classification'] ?? ''));
+      if (isset($year_level_data[$level][$classification])) {
+        $year_level_data[$level][$classification] = (int)$row['total'];
+      }
     }
+  }
 }
 
 // Close database connection
@@ -421,8 +434,9 @@ $conn->close();
         <div id="curriculumDropdownMenu" class="hidden absolute left-0 w-full z-10 flex flex-col bg-white border border-blue-200 rounded shadow-lg mt-1">
 		  <a href="bee.php" class="py-2 px-6 text-blue-800 hover:bg-blue-50 border-b border-blue-100 first:rounded-t">Bachelor Of Elementary Education</a>
 		  <a href="bseme.php" class="py-2 px-6 text-blue-800 hover:bg-blue-50 border-b border-blue-100">Bachelor Of Secondary Education Major In English</a>
-		  <a href="bsemm.php" class="py-2 px-6 text-blue-800 hover:bg-blue-50 border-b border-blue-100">Bachelor Of Secondary Education Major In Mathematics</a>
-		  <a href="bsems.php" class="py-2 px-6 text-blue-800 hover:bg-blue-50 last:rounded-b">Bachelor Of Secondary Education Major In Science</a>
+		  <a href="bsemm.php" class="py-2 px-6 text-blue-800 hover:bg-blue-50 border-b border-blue-100">Bachelor Of Secondary Education Major In Ma
+        
+      -2 px-6 text-blue-800 hover:bg-blue-50 last:rounded-b">Bachelor Of Secondary Education Major In Science</a>
         </div>
       </div>
 

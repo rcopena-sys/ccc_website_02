@@ -869,6 +869,8 @@ $program = trim($_GET['program'] ?? $_POST['program'] ?? '');
 $fiscalYear = trim($_GET['fiscal_year'] ?? $_POST['fiscal_year'] ?? '');
 
 $student = null;
+$isEligibleProgram = false; // true only for allowed DTE programs
+$blockedProgram = false;    // true when student exists but program not allowed
 if ($studentId !== '') {
     if (columnExists($conn, 'signin_db', 'student_id')) {
         // First, get the column names from the signin_db table
@@ -1012,7 +1014,7 @@ if (empty($program) && !empty($studentId)) {
     }
 }
 
-// Check for program in various formats (support TE programs and BSIT/BSCS)
+// Check for program in various formats and normalize to canonical labels
 $programRaw = trim($program);
 $normalizedProgram = strtoupper($programRaw);
 
@@ -1024,18 +1026,25 @@ if (strpos($normalizedProgram, 'BACHELOR OF ELEMENTARY EDUCATION') !== false) {
   $program = 'Bachelor Of Secondary Education Major In Mathematics';
 } elseif (strpos($normalizedProgram, 'BACHELOR OF SECONDARY EDUCATION MAJOR IN SCIENCE') !== false) {
   $program = 'Bachelor Of Secondary Education Major In Science';
-} elseif (strpos($normalizedProgram, 'BSIT') !== false) {
-  $program = 'BSIT';
-} elseif (strpos($normalizedProgram, 'BSCS') !== false) {
-  $program = 'BSCS';
 } else {
-  // If we still can't determine the program, show an error but don't default
-  error_log("Warning: Could not determine program for student $studentId. Program value: " . ($programRaw ?: 'empty'));
-  $program = ''; // Will trigger the program selection form
+  // For DTE, treat other programs (BSIT/BSCS/etc.) as not allowed
+  error_log("Warning: Non-DTE program for student $studentId. Raw program value: " . ($programRaw ?: 'empty'));
+  $program = $programRaw; // keep original text for logging; eligibility handled below
 }
 
-// Debug: Log the detected program
-error_log("Final program detected for student $studentId: '$program'");
+// Only these Teacher Education programs are allowed on this page
+$allowedPrograms = [
+  'Bachelor Of Elementary Education',
+  'Bachelor Of Secondary Education Major In English',
+  'Bachelor Of Secondary Education Major In Mathematics',
+  'Bachelor Of Secondary Education Major In Science',
+];
+
+$isEligibleProgram = in_array($program, $allowedPrograms, true);
+$blockedProgram = ($studentId !== '' && $student !== null && !$isEligibleProgram);
+
+// Debug: Log the detected program and eligibility
+error_log("Final program detected for student $studentId: '" . ($program ?: 'UNKNOWN') . "', eligible=" . ($isEligibleProgram ? 'true' : 'false') . ", blockedProgram=" . ($blockedProgram ? 'true' : 'false'));
 
 if ($fiscalYear === '') {
     $fy = latestFiscalYear($conn, $program);
@@ -1241,50 +1250,35 @@ if ($studentId !== '') {
 
 $ysOrder = ['1-1','1-2','2-1','2-2','3-1','3-2','4-1','4-2'];
 
-// Define unit limits for each semester and course
-$unitLimits = [
-    'BSIT' => [
-        '1-1' => ['max' => 26, 'label' => 'FIRST YEAR • FIRST SEMESTER'],
-        '1-2' => ['max' => 26, 'label' => 'FIRST YEAR • SECOND SEMESTER'],
-        '2-1' => ['max' => 26, 'label' => 'SECOND YEAR • FIRST SEMESTER'],
-        '2-2' => ['max' => 23, 'label' => 'SECOND YEAR • SECOND SEMESTER'],
-        '3-1' => ['max' => 24, 'label' => 'THIRD YEAR • FIRST SEMESTER'],
-        '3-2' => ['max' => 12, 'label' => 'THIRD YEAR • SECOND SEMESTER'],
-        '4-1' => ['max' => 6,  'label' => 'FOURTH YEAR • FIRST SEMESTER'],
-        '4-2' => ['max' => 6,  'label' => 'FOURTH YEAR • SECOND SEMESTER']
-    ],
-    'BSCS' => [
-        '1-1' => ['max' => 26, 'label' => 'FIRST YEAR • FIRST SEMESTER'],
-        '1-2' => ['max' => 26, 'label' => 'FIRST YEAR • SECOND SEMESTER'],
-        '2-1' => ['max' => 26, 'label' => 'SECOND YEAR • FIRST SEMESTER'],
-        '2-2' => ['max' => 26, 'label' => 'SECOND YEAR • SECOND SEMESTER'],
-        '3-1' => ['max' => 24, 'label' => 'THIRD YEAR • FIRST SEMESTER'],
-        '3-2' => ['max' => 13, 'label' => 'THIRD YEAR • SECOND SEMESTER'],
-        '4-1' => ['max' => 6,  'label' => 'FOURTH YEAR • FIRST SEMESTER'],
-        '4-2' => ['max' => 6,  'label' => 'FOURTH YEAR • SECOND SEMESTER']
-    ]
-];
-
-// Use the unit limits for labels if available, otherwise fallback to default
-$labels = [];
+// Dynamically compute the maximum units per semester from the curriculum data
+// instead of using hardcoded values. This sums all subject units in each
+// semester so the TOTAL UNITS denominator always matches the actual
+// curriculum in the database.
+$maxUnitsPerSemester = [];
 foreach ($ysOrder as $ys) {
-    if (isset($unitLimits[$program][$ys])) {
-        $labels[$ys] = $unitLimits[$program][$ys]['label'];
-    } else {
-        // Fallback labels
-        $defaultLabels = [
-            '1-1' => 'FIRST YEAR • FIRST SEMESTER',
-            '1-2' => 'FIRST YEAR • SECOND SEMESTER', 
-            '2-1' => 'SECOND YEAR • FIRST SEMESTER',
-            '2-2' => 'SECOND YEAR • SECOND SEMESTER',
-            '3-1' => 'THIRD YEAR • FIRST SEMESTER',
-            '3-2' => 'THIRD YEAR • SECOND SEMESTER',
-            '4-1' => 'FOURTH YEAR • FIRST SEMESTER',
-            '4-2' => 'FOURTH YEAR • SECOND SEMESTER'
-        ];
-        $labels[$ys] = $defaultLabels[$ys] ?? $ys;
+  $total = 0.0;
+  if (isset($curriculum[$ys])) {
+    foreach ($curriculum[$ys] as $course) {
+      $units = isset($course['units']) && $course['units'] !== ''
+        ? (float)$course['units']
+        : 0.0;
+      $total += $units;
     }
+  }
+  $maxUnitsPerSemester[$ys] = $total;
 }
+
+// Static labels per semester
+$labels = [
+  '1-1' => 'FIRST YEAR • FIRST SEMESTER',
+  '1-2' => 'FIRST YEAR • SECOND SEMESTER', 
+  '2-1' => 'SECOND YEAR • FIRST SEMESTER',
+  '2-2' => 'SECOND YEAR • SECOND SEMESTER',
+  '3-1' => 'THIRD YEAR • FIRST SEMESTER',
+  '3-2' => 'THIRD YEAR • SECOND SEMESTER',
+  '4-1' => 'FOURTH YEAR • FIRST SEMESTER',
+  '4-2' => 'FOURTH YEAR • SECOND SEMESTER'
+];
 
 ?>
 <!DOCTYPE html>
@@ -1653,8 +1647,10 @@ foreach ($ysOrder as $ys) {
       <div class="col-sm-3">
         <label class="form-label">Program</label>
         <select name="program" class="form-select">
-          <option value="BSCS" <?= $program==='BSCS'?'selected':'' ?>>BSCS</option>
-          <option value="BSIT" <?= $program==='BSIT'?'selected':'' ?>>BSIT</option>
+          <option value="Bachelor Of Elementary Education" <?= $program==='Bachelor Of Elementary Education'?'selected':'' ?>>Bachelor Of Elementary Education</option>
+          <option value="Bachelor Of Secondary Education Major In English" <?= $program==='Bachelor Of Secondary Education Major In English'?'selected':'' ?>>Bachelor Of Secondary Education Major In English</option>
+          <option value="Bachelor Of Secondary Education Major In Mathematics" <?= $program==='Bachelor Of Secondary Education Major In Mathematics'?'selected':'' ?>>Bachelor Of Secondary Education Major In Mathematics</option>
+          <option value="Bachelor Of Secondary Education Major In Science" <?= $program==='Bachelor Of Secondary Education Major In Science'?'selected':'' ?>>Bachelor Of Secondary Education Major In Science</option>
         </select>
       </div>
       <?php if (columnExists($conn, 'curriculum', 'fiscal_year')): ?>
@@ -1669,7 +1665,7 @@ foreach ($ysOrder as $ys) {
     </form>
   </div>
 
-<?php if ($student): 
+<?php if ($student && $isEligibleProgram): 
   // Calculate grand total of all units for the header
   $grandTotalUnits = 0;
   if (isset($ysOrder) && isset($curriculum)) {
@@ -2002,8 +1998,8 @@ foreach ($ysOrder as $ys) {
         // Total units = graded curriculum units + graded irregular units
         $semesterUnits = $gradedUnits + $irregularUnitsForTotal;
         
-        // Get unit limit for this semester and program
-        $maxUnits = isset($unitLimits[$program][$ysKey]) ? $unitLimits[$program][$ysKey]['max'] : 26; // Default to 26 if not set
+        // Get max units for this semester from dynamically computed curriculum totals
+        $maxUnits = isset($maxUnitsPerSemester[$ysKey]) ? $maxUnitsPerSemester[$ysKey] : 0;
         $isOverLimit = $semesterUnits > $maxUnits;
     ?>
   <div class="mb-4 <?= $isOverLimit ? 'unit-overlimit unit-limit-warning' : '' ?>" data-ys="<?= htmlspecialchars($ysKey) ?>">
@@ -2629,6 +2625,8 @@ if (!empty($curriculum)) {
     </div>
     <div class="page-number"></div>
   </div>
+<?php elseif ($blockedProgram): ?>
+  <div class="container"><div class="alert alert-warning">No student found for ID: <?= htmlspecialchars($studentId) ?>.</div></div>
 <?php elseif ($studentId !== ''): ?>
   <div class="container"><div class="alert alert-warning">No student found for ID: <?= htmlspecialchars($studentId) ?>.</div></div>
 <?php else: ?>
@@ -2943,9 +2941,9 @@ document.addEventListener('DOMContentLoaded', function() {
             form.addEventListener('submit', function(e) {
                 e.preventDefault();
                 
-                // Get program and unit limits from server-side data
+                // Get program and max units per semester from server-side data
                 const program = '<?= htmlspecialchars($program) ?>';
-                const unitLimits = <?= json_encode($unitLimits) ?>;
+                const maxUnitsPerSemester = <?= json_encode($maxUnitsPerSemester) ?>;
                 
                 // Get the selected year and semester
                 const yearSelect = document.getElementById('yearSelect');
@@ -2983,8 +2981,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
                 
-                // Check unit limits
-                const maxUnits = unitLimits[program] && unitLimits[program][yearSem] ? unitLimits[program][yearSem].max : 26;
+                // Check unit limits using dynamically computed max units per semester
+                const maxUnits = maxUnitsPerSemester[yearSem] !== undefined ? maxUnitsPerSemester[yearSem] : 26;
                 const totalUnitsAfter = currentUnits + newUnits;
                 
                 // Check if adding this subject would exceed the limit
@@ -3572,13 +3570,13 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         
-        // Get program and unit limits from server-side data
+        // Get program and max units per semester from server-side data
         const program = '<?= htmlspecialchars($program ?: 'BSIT') ?>';
-        const unitLimits = <?= json_encode($unitLimits) ?>;
+        const maxUnitsPerSemester = <?= json_encode($maxUnitsPerSemester) ?>;
         
         // Debug logging
         console.log('Program:', program);
-        console.log('Unit limits:', unitLimits);
+        console.log('Max units per semester:', maxUnitsPerSemester);
         console.log('YearSem:', yearSem);
         
         // Get current units from irregular_db only (not including curriculum subjects)
@@ -3618,7 +3616,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         
         const totalUnitsAfter = currentUnits + selectedUnits;
-        const maxUnits = unitLimits[program] && unitLimits[program][yearSem] ? unitLimits[program][yearSem].max : 26;
+        const maxUnits = maxUnitsPerSemester[yearSem] !== undefined ? maxUnitsPerSemester[yearSem] : 26;
         
         // Check if adding these subjects would exceed the limit
         if (totalUnitsAfter > maxUnits) {
