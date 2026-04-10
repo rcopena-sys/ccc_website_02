@@ -633,7 +633,13 @@ if ((isset($_POST['action']) && $_POST['action'] === 'delete_irregular') ||
 }
 
 // Handle Bulk Save to Irregular DB
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['CONTENT_TYPE']) && $_SERVER['CONTENT_TYPE'] === 'application/json') {
+// Be tolerant of content-type variations like "application/json; charset=UTF-8"
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  $contentType = $_SERVER['CONTENT_TYPE'] ?? ($_SERVER['HTTP_CONTENT_TYPE'] ?? '');
+  if (stripos($contentType, 'application/json') !== 0) {
+    // Not a JSON bulk-save request; let normal form POSTs continue below
+        
+  } else {
     $json_input = file_get_contents('php://input');
     $data = json_decode($json_input, true);
     
@@ -861,8 +867,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['CONTENT_TYPE']) && 
             ]);
         }
         exit;
+      }
+      }
     }
-}
 
 $studentId = trim($_GET['student_id'] ?? $_POST['student_id'] ?? '');
 $program = trim($_GET['program'] ?? $_POST['program'] ?? '');
@@ -1158,6 +1165,12 @@ if ($stmt) {
 // Fetch grades for the student with normalization and prefix-year-sem fallback
 $gradesByCode = [];
 $gradesByPrefixYearSem = [];
+// Track passed subjects (by normalized code) for client-side prerequisite checks
+$passedSubjects = [];
+// Track whether the student has at least one passed subject per semester (Y-S)
+$passedBySemester = [];
+// Track whether the student has any subjects in 1st Year • 1st Semester
+$hasFirstYearFirstSemGrade = false;
 if ($studentId !== '') {
     // Get all grades for the student, ordered by year and semester
     $gstmt = $conn->prepare("SELECT * FROM grades_db WHERE student_id = ? ORDER BY year, sem");
@@ -1176,6 +1189,22 @@ if ($studentId !== '') {
             $gradeValue = !empty($g['final_grade']) ? $g['final_grade'] : ($g['grade'] ?? '');
             
             if (empty($gradeValue)) continue;  // Skip if no grade value
+
+            // Determine if this grade is passing for prerequisite purposes
+            $isPassed = false;
+            if (is_numeric($gradeValue)) {
+              $gv = (float)$gradeValue;
+              if ($gv <= 3.25) {
+                $isPassed = true;
+              }
+            } elseif (is_string($gradeValue) && strtoupper(trim($gradeValue)) === 'PASSED') {
+              $isPassed = true;
+            }
+
+            if ($isPassed) {
+              // Store only by normalized code; JS will use this for prerequisite checks
+              $passedSubjects[$norm] = true;
+            }
             
             // Store the grade with multiple key formats for flexible matching
             $gradesByCode[$norm] = $gradeValue;  // Normalized code (e.g., 'CCS-0001')
@@ -1199,6 +1228,17 @@ if ($studentId !== '') {
                     // Store in prefix-year-sem array
                     $gradesByPrefixYearSem["{$prefix}-{$year}-{$sem}"] = $gradeValue;
                 }
+
+                  // Track at least one passed subject per semester (e.g., '1-1')
+                  if ($isPassed) {
+                    $ysKey = $year . '-' . $sem;
+                    $passedBySemester[$ysKey] = true;
+                  }
+
+                  // Remember if the student has any 1st Year • 1st Semester subjects
+                  if ($year === 1 && $sem === 1) {
+                    $hasFirstYearFirstSemGrade = true;
+                  }
             }
             
             // Enhanced debug log with more context
@@ -1227,6 +1267,39 @@ if ($studentId !== '') {
         }
         $gstmt->close();
     }
+
+        // If still no 1st Year • 1st Semester record found in grades_db,
+        // also check irregular_db so enrollment there can unlock higher-year
+        // subjects even without a grade yet.
+        if (!$hasFirstYearFirstSemGrade) {
+          try {
+            $colsRes = $conn->query("SHOW COLUMNS FROM irregular_db");
+            if ($colsRes) {
+              $columns = [];
+              while ($c = $colsRes->fetch_assoc()) {
+                $columns[] = $c['Field'];
+              }
+              $yearCol = in_array('year_level', $columns) ? 'year_level' : (in_array('year', $columns) ? 'year' : null);
+              $semCol = in_array('semester', $columns) ? 'semester' : (in_array('sem', $columns) ? 'sem' : null);
+
+              if ($yearCol && $semCol) {
+                $sql = "SELECT 1 FROM irregular_db WHERE student_id = ? AND {$yearCol} = 1 AND {$semCol} = 1 LIMIT 1";
+                $istmt = $conn->prepare($sql);
+                if ($istmt) {
+                  $istmt->bind_param('s', $studentId);
+                  $istmt->execute();
+                  $ires = $istmt->get_result();
+                  if ($ires && $ires->num_rows > 0) {
+                    $hasFirstYearFirstSemGrade = true;
+                  }
+                  $istmt->close();
+                }
+              }
+            }
+          } catch (Exception $e) {
+            error_log('Error checking irregular_db for 1-1 subjects: ' . $e->getMessage());
+          }
+        }
 }
 
 $ysOrder = ['1-1','1-2','2-1','2-2','3-1','3-2','4-1','4-2'];
@@ -1250,6 +1323,19 @@ foreach ($ysOrder as $ys) {
   $maxUnitsPerSemester[$ys] = $total;
 }
 
+// Build a unit limit configuration per program and semester
+// Used by the frontend to prevent exceeding the curriculum load.
+$unitLimits = [
+    'BSIT' => [],
+    'BSCS' => [],
+];
+
+foreach ($ysOrder as $ys) {
+    $limit = $maxUnitsPerSemester[$ys] ?? 26; // Fallback to 26 if not found
+    $unitLimits['BSIT'][$ys] = ['max' => $limit];
+    $unitLimits['BSCS'][$ys] = ['max' => $limit];
+}
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -1261,6 +1347,12 @@ foreach ($ysOrder as $ys) {
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script>
+    // Expose passed subject codes (normalized) for client-side prerequisite validation
+    window.passedSubjects = <?php echo json_encode(array_keys($passedSubjects ?? [])); ?>;
+    // Flag: does the student have any subjects in 1st Year • 1st Semester?
+    window.hasFirstYearFirstSem = <?php echo $hasFirstYearFirstSemGrade ? 'true' : 'false'; ?>;
+  </script>
 
   <style>
     /* Irregular subject styling */
@@ -2179,6 +2271,10 @@ if (!empty($curriculum)) {
                   $rowClass = '';
                   $prereqFailed = false;
                   $prereq = $subj['prereq'] ?? '';
+                  // For classification-based prerequisites (e.g., "Regular"),
+                  // this flag controls whether the subject should be blocked
+                  // for clicking even if the student is classified as Regular.
+                  $regularPrereqBlocked = false;
                   
                   // Handle grade value extraction from array or direct value
                   $gradeValue = '';
@@ -2260,12 +2356,30 @@ if (!empty($curriculum)) {
                       
                       // If student is any "Regular" classification, they should NOT be blocked
                       if ($isDirectRegular) {
-                          // Any Regular student should be able to take courses with Regular-based prerequisites
+                          // For classification prerequisites (Regular, Regular 3rd Year, Regular 4th Year)
+                          // require that key earlier semesters have at least one passed subject
+                          // before allowing the subject to be clickable.
                           if ($isClassificationPrereq) {
-                              // For classification prerequisites (Regular, Regular 3rd Year, Regular 4th Year)
-                              // Regular students should always pass
+                            $requiredRegularSemesters = ['1-1','1-2','2-1','2-2','3-1'];
+                            $allRequiredPassed = true;
+                            foreach ($requiredRegularSemesters as $reqYs) {
+                              if (empty($passedBySemester[$reqYs])) {
+                                $allRequiredPassed = false;
+                                break;
+                              }
+                            }
+
+                            if ($allRequiredPassed) {
                               $prereqFailed = false;
-                              error_log("DEBUG: Student is Regular ($studentClassification) and prerequisite is classification-based ($prereq), setting prereqFailed = false");
+                              $regularPrereqBlocked = false;
+                              error_log("DEBUG: Regular student meets Regular classification prerequisite based on passed semesters.");
+                            } else {
+                              // Keep prereqFailed as-is so row styling doesn't
+                              // mark it as prereq-failed for Regular students,
+                              // but block the checkbox via regularPrereqBlocked.
+                              $regularPrereqBlocked = true;
+                              error_log("DEBUG: Regular student missing passed grades in required semesters for Regular prerequisite; blocking click.");
+                            }
                           } else {
                               // For regular course prerequisites, check normally
                               $prereqCodes = array_map('trim', explode(',', $prereq));
@@ -2393,8 +2507,45 @@ if (!empty($curriculum)) {
                             $isPassed = true;
                         }
                     }
+                    // Extra rule: if the student has no subjects in 1st Year • 1st Semester
+                    // and this subject is in specified later semesters with PRE-REQ of 'None',
+                    // make the checkbox not clickable from the start.
+                    $normalizedPrereq = strtolower(trim($prereq ?? ''));
+                    $ysKeyCurrent = $yr . '-' . $sm;
+                    $needsFirstYearFirstSemBlock = (
+                      in_array($ysKeyCurrent, ['2-2','3-1','3-2','4-1','4-2'], true) &&
+                      in_array($normalizedPrereq, ['none','n/a','-','', 'none '], true) &&
+                      !$hasFirstYearFirstSemGrade
+                    );
                     ?>
-                    <?php if ($prereqFailed && !$isRegular): ?>
+                    <?php if ($needsFirstYearFirstSemBlock): ?>
+                      <span style="color: #e63e3eff; font-size: 1.2em; font-weight: bold;" title="Cannot select: no subjects in First Year • First Semester.">✗</span>
+                      <input type="checkbox" class="form-check-input subject-checkbox" 
+                             value="<?= htmlspecialchars($code) ?>"
+                             data-title="<?= htmlspecialchars($subj['title']) ?>"
+                             data-units="<?= htmlspecialchars($subj['units'] ?? '3') ?>"
+                             data-lec="<?= htmlspecialchars($subj['lec'] ?? '0') ?>"
+                             data-lab="<?= htmlspecialchars($subj['lab'] ?? '0') ?>"
+                             data-prereq="<?= htmlspecialchars($subj['prereq'] ?? '') ?>"
+                             data-year="<?= $yr ?>"
+                             data-sem="<?= $sm ?>"
+                             disabled
+                             title="Cannot select: no subjects in First Year • First Semester."
+                             style="display: none;">
+                    <?php elseif ($regularPrereqBlocked): ?>
+                      <span style="color: #e63e3eff; font-size: 1.2em; font-weight: bold;" title="Cannot select: Regular prerequisite not yet satisfied.">✗</span>
+                      <input type="checkbox" class="form-check-input subject-checkbox" 
+                             value="<?= htmlspecialchars($code) ?>"
+                             data-title="<?= htmlspecialchars($subj['title']) ?>"
+                             data-units="<?= htmlspecialchars($subj['units'] ?? '3') ?>"
+                             data-lec="<?= htmlspecialchars($subj['lec'] ?? '0') ?>"
+                             data-lab="<?= htmlspecialchars($subj['lab'] ?? '0') ?>"
+                             data-prereq="<?= htmlspecialchars($subj['prereq'] ?? '') ?>"
+                             data-year="<?= $yr ?>"
+                             data-sem="<?= $sm ?>"
+                             disabled
+                             style="display: none;">
+                    <?php elseif ($prereqFailed && !$isRegular): ?>
                       <span style="color: #e63e3eff; font-size: 1.2em; font-weight: bold;">✗</span>
                       <input type="checkbox" class="form-check-input subject-checkbox" 
                              value="<?= htmlspecialchars($code) ?>"
@@ -2796,6 +2947,44 @@ document.addEventListener('DOMContentLoaded', function() {
         
         const ysKey = selectAllBtn.getAttribute('data-ys');
         if (!ysKey) return;
+
+      // Extra rule: if the student has no subjects in 1st Year • 1st Semester,
+      // block "Select All" for specific higher semesters when their subjects
+      // are effectively PRE-REQ "None". This mirrors the per-subject rule in
+      // checkPrerequisites but shows only one SweetAlert instead of many.
+      try {
+        const hasFirstYearFirstSem = !!window.hasFirstYearFirstSem;
+        const parts = ysKey.split('-');
+        const year = parseInt(parts[0] || '0', 10);
+        const sem = parseInt(parts[1] || '0', 10);
+
+        const needsFirstYearFirstSem =
+          (year === 2 && (sem === 1 || sem === 2)) ||
+          (year === 3 && (sem === 1 || sem === 2)) ||
+          (year === 4 && (sem === 1 || sem === 2));
+
+        if (needsFirstYearFirstSem && !hasFirstYearFirstSem) {
+          if (typeof Swal !== 'undefined') {
+            Swal.fire({
+              icon: 'error',
+              title: 'First Year First Semester Required',
+              html: `
+                <p>You cannot select all subjects in this semester yet.</p>
+                <p>Please fill the <strong>First Year 
+                          
+                          
+                First Semester</strong> subjects first.</p>
+              `,
+              confirmButtonText: 'OK'
+            });
+          } else {
+            alert('Please fill the First Year First Semester subjects first.');
+          }
+          return;
+        }
+      } catch (err) {
+        console.error('Error applying Select All first-year check:', err);
+      }
         
         // Find the specific semester section using the data-ys attribute
         const semesterSection = document.querySelector(`[data-ys="${ysKey}"]`);
@@ -3429,6 +3618,95 @@ document.addEventListener('DOMContentLoaded', function() {
     const selectedSubjectsList = document.getElementById('selectedSubjectsList');
     const totalUnitsBadge = document.getElementById('totalUnitsBadge');
     
+    // Normalize a course code similar to PHP's normalizeCourseCode
+    function normalizeCode(code) {
+      return String(code || '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '');
+    }
+
+    // Build a Set of passed subject codes for fast lookup
+    const passedSubjectCodes = Array.isArray(window.passedSubjects) ? window.passedSubjects : [];
+    const passedSubjectsSet = new Set(passedSubjectCodes.map(normalizeCode));
+
+    // Validate prerequisites for a selected subject-checkbox using its data-prereq
+    function checkPrerequisites(checkbox) {
+      const year = parseInt(checkbox.dataset.year || '0', 10);
+      const sem = parseInt(checkbox.dataset.sem || '0', 10);
+      const raw = (checkbox.dataset.prereq || '').trim();
+
+      // Extra rule: if the student has no subjects in 1st Year • 1st Semester,
+      // block selection in specific higher semesters even when PRE-REQ is "None".
+      // This applies when clicking subjects whose PRE-REQ is shown as "None".
+      const needsFirstYearFirstSem =
+        (year === 2 && (sem === 1 || sem === 2)) || // SECOND YEAR • FIRST/SECOND SEMESTER
+        (year === 3 && (sem === 1 || sem === 2)) || // THIRD YEAR • FIRST/SECOND SEMESTER
+        (year === 4 && (sem === 1 || sem === 2));   // FOURTH YEAR • FIRST/SECOND SEMESTER
+
+      const hasFirstYearFirstSem = !!window.hasFirstYearFirstSem;
+      const rawLower = raw.toLowerCase();
+
+      if (needsFirstYearFirstSem && !hasFirstYearFirstSem && (!raw || ['none', 'n/a', '-', 'none '].includes(rawLower))) {
+        const subjectCode = checkbox.value || checkbox.dataset.code || '';
+        if (typeof Swal !== 'undefined') {
+          Swal.fire({
+            icon: 'error',
+            title: 'First Year First Semester Required',
+            html: `
+              <p>You cannot select <strong>${subjectCode}</strong> yet.</p>
+              <p>Please fill the <strong>First Year • First Semester</strong> subjects first.</p>
+            `,
+            confirmButtonText: 'OK'
+          });
+        } else {
+          alert('Please fill the First Year • First Semester subjects first.');
+        }
+        return false;
+      }
+
+      if (!raw) return true;
+
+      const lower = raw.toLowerCase();
+      if (['none', 'n/a', '-', ''].includes(lower)) return true;
+
+      const parts = raw.split(',').map(p => p.trim()).filter(Boolean);
+      const missing = [];
+
+      parts.forEach(p => {
+        const lowerP = p.toLowerCase();
+        // Skip classification-based prerequisites like "Regular 3rd Year"
+        if (lowerP.includes('regular')) return;
+        // Ignore entries without any digits (likely classification text)
+        if (!/[0-9]/.test(p)) return;
+
+        const norm = normalizeCode(p);
+        if (!passedSubjectsSet.has(norm)) {
+          missing.push(p);
+        }
+      });
+
+      if (missing.length === 0) return true;
+
+      if (typeof Swal !== 'undefined') {
+        const subjectCode = checkbox.value || checkbox.dataset.code || '';
+        const plural = missing.length > 1;
+        Swal.fire({
+          icon: 'error',
+          title: 'Pre-requisite Not Met',
+          html: `
+            <p>You cannot select <strong>${subjectCode}</strong> because the following prerequisite${plural ? 's are' : ' is'} not passed:</p>
+            <ul><li>${missing.join('</li><li>')}</li></ul>
+            <p style="margin-top:8px;">Please complete and pass ${plural ? 'these subjects' : 'this subject'} first.</p>
+          `,
+          confirmButtonText: 'OK'
+        });
+      } else {
+        alert('Pre-requisite not met. Missing: ' + missing.join(', '));
+      }
+
+      return false;
+    }
+    
     // Update selected subjects display
     function updateSelectedDisplay() {
         const selectedCheckboxes = document.querySelectorAll('.subject-checkbox:checked');
@@ -3498,9 +3776,19 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Individual checkbox changes
+    // Individual checkbox changes with prerequisite validation
     subjectCheckboxes.forEach(checkbox => {
-        checkbox.addEventListener('change', updateSelectedDisplay);
+      checkbox.addEventListener('change', function() {
+        // Only validate when trying to select the subject
+        if (this.checked) {
+          const ok = checkPrerequisites(this);
+          if (!ok) {
+            this.checked = false;
+            return;
+          }
+        }
+        updateSelectedDisplay();
+      });
     });
     
     // Year-semester selection change
@@ -3514,7 +3802,9 @@ document.addEventListener('DOMContentLoaded', function() {
         subjectCheckboxes.forEach(checkbox => {
             checkbox.checked = false;
         });
+      if (selectAllCheckbox) {
         selectAllCheckbox.checked = false;
+      }
         updateSelectedDisplay();
     });
     
@@ -3651,17 +3941,34 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(data => {
             console.log('Response data:', data);
             if (data.success) {
-                const message = `Successfully saved ${subjects.length} subjects to irregular database.`;
-                alert(message);
-                // Clear selection after successful save
-                clearSelectionBtn.click();
+            const message = data.message || `Successfully saved ${subjects.length} subjects to irregular database.`;
+            Swal.fire({
+              icon: 'success',
+              title: 'Saved!',
+              text: message,
+              confirmButtonText: 'OK'
+            }).then(() => {
+              // Clear selection after successful save and refresh to show updated data
+              clearSelectionBtn.click();
+              window.location.reload();
+            });
             } else {
-                alert('Error saving subjects: ' + (data.message || 'Unknown error'));
+            Swal.fire({
+              icon: 'error',
+              title: 'Save Failed',
+              text: data.message || 'Error saving subjects. Please try again.',
+              confirmButtonText: 'OK'
+            });
             }
         })
         .catch(error => {
             console.error('Error:', error);
-            alert('Error saving subjects. Please try again.');
+          Swal.fire({
+            icon: 'error',
+            title: 'Error',
+            text: 'Error saving subjects. Please try again.',
+            confirmButtonText: 'OK'
+          });
         });
     });
 });
@@ -3731,9 +4038,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 });
-</script>
-</body>
-</html> 
 </script>
 </body>
 </html>

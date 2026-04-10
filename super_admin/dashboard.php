@@ -110,9 +110,6 @@ $sql = "(SELECT
 $result = $conn->query($sql);
 $total_students = $result ? $result->num_rows : 0;
 
-// Get total staff (excluding students)
-$total_staff = ($user_stats['Super Admin'] ?? 0) + ($user_stats['Admin'] ?? 0) + ($user_stats['Registrar'] ?? 0) + ($user_stats['Dean'] ?? 0) + ($user_stats['Staff'] ?? 0);
-
 // Get recent activity
 $recent_activity = [];
 $sql = "SELECT al.*, s.firstname, s.lastname FROM activity_log_db al 
@@ -680,12 +677,6 @@ $conn->close();
                 </a>
             </div>
             <div class="nav-item">
-                <a href="student_acc.php" class="nav-link">
-                    <i class="fas fa-user-graduate"></i>
-                    Student Accounts
-                </a>
-            </div>
-            <div class="nav-item">
                 <a href="calendars.php" class="nav-link">
                     <i class="fas fa-calendar-alt"></i>
                     Calendar
@@ -739,14 +730,6 @@ $conn->close();
                 </div>
                 <div class="stat-value"><?php echo number_format($total_students); ?></div>
                 <div class="stat-label">Total Students</div>
-            </a>
-            
-            <a href="staff.php?filter=staff" class="stat-card">
-                <div class="stat-icon staff">
-                    <i class="fas fa-users"></i>
-                </div>
-                <div class="stat-value"><?php echo number_format($total_staff); ?></div>
-                <div class="stat-label">Total Staff</div>
             </a>
             
             <a href="admin.php?filter=admin" class="stat-card">

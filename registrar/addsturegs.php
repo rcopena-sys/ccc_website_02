@@ -92,6 +92,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
 
     // Check if student ID already exists
     $check_stmt = $conn->prepare("SELECT student_id FROM students_db WHERE student_id = ?");
+    if (!$check_stmt) {
+        error_log('addsturegs.php: Prepare failed for student_id check: ' . $conn->error);
+        echo "<script>alert('Server error while checking student ID. Please contact the administrator.'); window.history.back();</script>";
+        exit();
+    }
     $check_stmt->bind_param("s", $student_id);
     $check_stmt->execute();
     $check_stmt->store_result();
@@ -104,6 +109,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
 
     // Check if student name already exists (allow only one record per name)
     $check_name_stmt = $conn->prepare("SELECT student_id FROM students_db WHERE student_name = ?");
+    if (!$check_name_stmt) {
+        error_log('addsturegs.php: Prepare failed for student_name check: ' . $conn->error);
+        echo "<script>alert('Server error while checking student name. Please contact the administrator.'); window.history.back();</script>";
+        exit();
+    }
     $check_name_stmt->bind_param("s", $student_name);
     $check_name_stmt->execute();
     $check_name_stmt->store_result();
@@ -116,6 +126,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
 
     // Insert into students_db
     $stmt = $conn->prepare("INSERT INTO students_db (student_id, student_name, email, curriculum, classification, programs, academic_year, semester, status, gender, fiscal_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    if (!$stmt) {
+        error_log('addsturegs.php: Prepare failed for students_db insert: ' . $conn->error);
+        echo "<script>alert('Server error while registering student. Please contact the administrator.'); window.history.back();</script>";
+        exit();
+    }
     $stmt->bind_param("sssssssssss", $student_id, $student_name, $email, $curriculum, $classification, $programs, $academic_year, $semester, $status, $gender, $fiscal_year);
 
     if ($stmt->execute()) {

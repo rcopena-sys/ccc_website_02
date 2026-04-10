@@ -663,13 +663,6 @@ $conn->close();
                 <div class="stat-value"><?php echo count(array_unique(array_column($curriculum_list, 'program'))); ?></div>
                 <div class="stat-label">Programs</div>
             </div>
-            <div class="stat-card" style="animation-delay: 0.3s;">
-                <div class="stat-icon">
-                    <i class="fas fa-book"></i>
-                </div>
-                <div class="stat-value"><?php echo array_sum(array_column($curriculum_list, 'curriculum_count')); ?></div>
-                <div class="stat-label">Total courses</div>
-            </div>
         </div>
         
         <!-- Search Section -->
