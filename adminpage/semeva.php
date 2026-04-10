@@ -7,6 +7,8 @@ $student_info = null;
 $selected_semester = '';
 $semesters = [];
 $grades_for_semester = [];
+$curriculum_for_semester = [];
+$gradesByCodeForSem = [];
 $error_message = '';
 $program = ''; // Will store BSIT or BSCS
 
@@ -15,6 +17,18 @@ function columnExists($conn, $table, $column) {
     $query = "SELECT 1 FROM information_schema.columns WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '$table' AND COLUMN_NAME = '$column'";
     $result = $conn->query($query);
     return $result && $result->num_rows > 0;
+}
+
+// Normalize various year/semester text formats to a standard "Y-S" key like "1-1"
+function normalizeSemesterKey($raw) {
+    $raw = strtolower(trim($raw));
+    $raw = str_replace(['first','second','third','fourth','1st','2nd','3rd','4th'], ['1','2','3','4','1','2','3','4'], $raw);
+    $raw = str_replace(['year','yr','semester','sem',' ', '-'], '', $raw);
+    if (preg_match('/^([1-4])([1-2])$/', $raw, $m)) {
+        return $m[1] . '-' . $m[2];
+    }
+    if (preg_match('/^[1-4]-[1-2]$/', $raw)) return $raw;
+    return $raw;
 }
 
 // Handle form submission
@@ -108,6 +122,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Default
                 $program = 'BSCS';
             }
+
+            // Determine the student's fiscal year (from students_db, if available)
+            $studentFiscalYear = trim($student_info['fiscal_year'] ?? '');
             
             // Generate year-level based semester options (1-1 to 4-2)
             $semesters = [];
@@ -131,6 +148,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // For grades_db, year and sem are stored as simple numbers/strings like '1' and '1'
                 $dbYear = $ySel;
                 $dbSem = $sSel;
+
+                // 1) Load curriculum subjects for this program and selected semester
+                $curriculum_for_semester = [];
+                $hasYearSem = columnExists($conn, 'curriculum', 'year_semester');
+                $currSql = "SELECT $codeCol AS code, $titleCol AS title, $lecCol AS lec, $labCol AS lab, $totalCol AS units, $preCol AS prereq";
+                if ($hasYearSem) {
+                    $currSql .= ", year_semester AS ys";
+                } else {
+                    $currSql .= ", year, semester";
+                }
+                $currSql .= " FROM curriculum WHERE 1=1";
+                $currParams = [];
+                $currTypes = '';
+                if (columnExists($conn, 'curriculum', 'program') && !empty($program)) {
+                    $currSql .= " AND program = ?";
+                    $currParams[] = $program;
+                    $currTypes .= 's';
+                }
+
+                // Restrict curriculum to the student's fiscal year when both columns exist
+                if ($studentFiscalYear !== '' && columnExists($conn, 'curriculum', 'fiscal_year')) {
+                    $currSql .= " AND fiscal_year = ?";
+                    $currParams[] = $studentFiscalYear;
+                    $currTypes .= 's';
+                }
+
+                $currStmt = $conn->prepare($currSql);
+                if ($currStmt) {
+                    if ($currTypes !== '') {
+                        $currStmt->bind_param($currTypes, ...$currParams);
+                    }
+                    if ($currStmt->execute()) {
+                        $currRes = $currStmt->get_result();
+                        if ($currRes) {
+                            while ($row = $currRes->fetch_assoc()) {
+                                if ($hasYearSem) {
+                                    $ysKey = normalizeSemesterKey($row['ys']);
+                                } else {
+                                    $ysKey = (string)($row['year'] . '-' . (int)$row['semester']);
+                                }
+                                if ($ysKey === $selected_semester) {
+                                    $curriculum_for_semester[] = $row;
+                                }
+                            }
+                        }
+                    }
+                    $currStmt->close();
+                }
 
                 // Build the query to get courses for the selected semester
                 // Use a completely different approach - process data in PHP to ensure single entries
@@ -209,6 +274,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             // Convert back to indexed array
                             $grades_for_semester = array_values($unique_courses);
 
+                            // Build a quick lookup by course code for overlaying grades on curriculum
+                            $gradesByCodeForSem = [];
+                            foreach ($grades_for_semester as $course) {
+                                $code = trim($course['course_code'] ?? '');
+                                if ($code === '') continue;
+                                $gradesByCodeForSem[$code] = $course;
+                            }
+
                             // Debug (uncomment for server logs)
                             // error_log("Student: $student_id, Year: $dbYear, Sem: $dbSem");
                             // error_log("Found " . count($all_courses) . " total courses, " . count($grades_for_semester) . " unique courses");
@@ -242,19 +315,94 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Student Evaluation by Semester</title> <link rel="icon" type="image/x-icon" href="favicon.ico">
-    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-    <style>
-        .grade-report { background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 0 10px #ddd; }
-        .table th, .table td { vertical-align: middle !important; }
-        .semester-title { background: #f1f1f1; padding: 10px; margin-top: 30px; border-radius: 5px; font-weight: bold; }
-    </style>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Student Evaluation by Semester</title> <link rel="icon" type="image/x-icon" href="favicon.ico">
+        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+        <style>
+                .grade-report { background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 0 10px #ddd; }
+                .table th, .table td { vertical-align: middle !important; }
+                .semester-title { background: #f1f1f1; padding: 10px; margin-top: 30px; border-radius: 5px; font-weight: bold; }
+
+                /* Layout styling similar to stueval.php */
+                body {
+                        font-family: 'Arial', sans-serif;
+                        background: #f8f9fa;
+                        margin: 0;
+                        padding: 0;
+                }
+                .sidebar {
+                        width: 250px;
+                        background: #3a7bd5;
+                        color: white;
+                        padding: 20px 0;
+                        height: 100vh;
+                        position: fixed;
+                        overflow-y: auto;
+                        box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+                }
+                .main-content {
+                        margin-left: 250px;
+                        padding: 20px;
+                        background: #f8f9fa;
+                        min-height: 100vh;
+                }
+                .nav-link {
+                        color: rgba(255,255,255,0.8);
+                        padding: 10px 20px;
+                        margin: 5px 10px;
+                        border-radius: 5px;
+                        transition: all 0.3s;
+                        text-decoration: none;
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                }
+                .nav-link:hover, .nav-link.active {
+                        background: rgba(255,255,255,0.1);
+                        color: white;
+                }
+                .nav-link i {
+                        width: 20px;
+                        text-align: center;
+                }
+        </style>
 </head>
-<body style="background:#f8f9fa;">
-<div class="container mt-5">
-    <div class="grade-report">
+<body>
+    <!-- Sidebar similar to stueval.php -->
+    <div class="sidebar">
+        <div class="d-flex flex-column align-items-center mb-4">
+            <img src="dci.png.png" alt="DCI Logo" style="width: 120px; margin-top: 10px;">
+        </div>
+        <ul class="nav flex-column">
+            <li class="nav-item mb-2">
+                <a href="dashboard2.php" class="nav-link">
+                    <i class="bi bi-arrow-left"></i> Back to Dashboard
+                </a>
+            </li>
+            <li class="nav-item mb-2">
+                <a href="stueval.php" class="nav-link">
+                    <i class="bi bi-journal-text"></i> Student Evaluation
+                </a>
+            </li>
+            <li class="nav-item mb-2">
+                <a href="semeva.php" class="nav-link active">
+                    <i class="bi bi-calendar3"></i> Semester Evaluation
+                </a>
+            </li>
+            <li class="nav-item mb-2">
+                <a href="list.php" class="nav-link">
+                    <i class="bi bi-people"></i> Student List
+                </a>
+            </li>
+        </ul>
+    </div>
+
+    <!-- Main content area -->
+    <div class="main-content">
+<div class="container mt-3 mt-md-5">
+        <div class="grade-report">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <div class="d-flex align-items-center">
                 <img src="chomelogo.png" alt="CCC Logo" style="height:60px;">
@@ -444,7 +592,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             </style>
 
-            <?php if ($selected_semester !== '' && !empty($grades_for_semester)): ?>
+            <?php
+            // Decide which rows to render: prefer curriculum rows for this semester,
+            // fall back to grade rows if no curriculum exists.
+            $rows_to_show = [];
+            $use_curriculum_rows = false;
+            if ($selected_semester !== '') {
+                if (!empty($curriculum_for_semester)) {
+                    $rows_to_show = $curriculum_for_semester;
+                    $use_curriculum_rows = true;
+                } else {
+                    $rows_to_show = $grades_for_semester;
+                }
+            }
+            ?>
+
+            <?php if ($selected_semester !== '' && !empty($rows_to_show)): ?>
                 <div class="semester-title"><?= htmlspecialchars($selected_semester) ?></div>
                 <div class="table-responsive">
                     <table class="curriculum-table">
@@ -462,13 +625,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <tbody>
                             <?php 
                             $totalUnits = 0.0;
-                            foreach ($grades_for_semester as $grade): 
-                                $gCode  = trim($grade['course_code'] ?? '');
-                                $gTitle = $grade['course_title'] ?? '';
-                                $gLec   = (float)($grade['lec_units'] ?? 0);
-                                $gLab   = (float)($grade['lab_units'] ?? 0);
-                                $gUnits = (float)($grade['total_units'] ?? ($gLec + $gLab));
-                                $gFinal = trim($grade['final_grade'] ?? '');
+                            $totalLec = 0.0;
+                            $totalLab = 0.0;
+                            foreach ($rows_to_show as $row): 
+                                if ($use_curriculum_rows) {
+                                    // Base data from curriculum; overlay grade info when available
+                                    $gCode  = trim($row['code'] ?? '');
+                                    $gTitle = $row['title'] ?? '';
+                                    $gLec   = (float)($row['lec'] ?? 0);
+                                    $gLab   = (float)($row['lab'] ?? 0);
+                                    $gUnits = (float)($row['units'] ?? ($gLec + $gLab));
+                                    $gPrereq = $row['prereq'] ?? '';
+                                    $gradeData = isset($gradesByCodeForSem[$gCode]) ? $gradesByCodeForSem[$gCode] : null;
+                                    $gFinal = trim($gradeData['final_grade'] ?? '');
+                                    $sourceType = $gradeData['source_type'] ?? 'grade';
+                                } else {
+                                    // Fallback: existing behaviour using grade rows directly
+                                    $gCode  = trim($row['course_code'] ?? '');
+                                    $gTitle = $row['course_title'] ?? '';
+                                    $gLec   = (float)($row['lec_units'] ?? 0);
+                                    $gLab   = (float)($row['lab_units'] ?? 0);
+                                    $gUnits = (float)($row['total_units'] ?? ($gLec + $gLab));
+                                    $gPrereq = $row['prerequisites'] ?? '';
+                                    $gFinal = trim($row['final_grade'] ?? '');
+                                    $sourceType = $row['source_type'] ?? 'grade';
+                                }
+
+                                $totalLec += $gLec;
+                                $totalLab += $gLab;
                                 
                                 // Only show units if there's a passing grade (simple heuristic)
                                 $displayUnits = (!empty($gFinal) && $gFinal !== 'N/A' && strtoupper($gFinal) !== 'INC' && strtoupper($gFinal) !== 'DRP' && $gFinal !== '5.0') ? $gUnits : '';
@@ -498,8 +682,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     }
                                 }
                                 
-                                // Determine if this is an irregular subject (check if final_grade is null)
-                                $isIrregular = is_null($grade['final_grade']);
+                                // Determine if this is an irregular subject
+                                $isIrregular = ($sourceType === 'irregular' || $gFinal === '');
                                 $rowClass = $isIrregular ? 'irregular-subject' : '';
                             ?>
                             <tr class="<?= $rowClass ?>">
@@ -510,7 +694,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <td class="text-center"><?= $displayUnits !== '' ? number_format($displayUnits, 1) : '<span class="text-muted">-</span>' ?></td>
                                 <td class="prereq-cell">
                                     <?php 
-                                    $prereq = $grade['prerequisites'] ?? '';
+                                    $prereq = $gPrereq ?? '';
                                     echo $prereq !== '' ? htmlspecialchars($prereq) : '<span class="text-muted">None</span>';
                                     ?>
                                 </td>
@@ -526,8 +710,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <!-- Total Units Row -->
                             <tr class="total-units-row">
                                 <td colspan="2">TOTAL UNITS</td>
-                                <td class="text-center"><?= number_format(array_sum(array_map(function($g) { return (float)($g['lec_units'] ?? 0); }, $grades_for_semester)), 1) ?></td>
-                                <td class="text-center"><?= number_format(array_sum(array_map(function($g) { return (float)($g['lab_units'] ?? 0); }, $grades_for_semester)), 1) ?></td>
+                                <td class="text-center"><?= number_format($totalLec, 1) ?></td>
+                                <td class="text-center"><?= number_format($totalLab, 1) ?></td>
                                 <td class="text-center"><?= number_format($totalUnits, 1) ?></td>
                                 <td></td>
                                 <td></td>
@@ -536,10 +720,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </table>
                 </div>
             <?php else: ?>
-                <div class="alert alert-info">No grades found for this student<?php echo $selected_semester? ' in the selected semester.' : '.'; ?></div>
+                <div class="alert alert-info">
+                    <?php
+                    if ($selected_semester !== '' && empty($curriculum_for_semester) && empty($grades_for_semester)) {
+                        echo 'No curriculum subjects or grades found for this semester.';
+                    } else {
+                        echo 'No grades found for this student' . ($selected_semester ? ' in the selected semester.' : '.');
+                    }
+                    ?>
+                </div>
             <?php endif; ?>
         <?php endif; ?>
     </div>
+        </div>
 </div>
+    </div>
 </body>
 </html>

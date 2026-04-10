@@ -1,3 +1,7 @@
+<?php
+session_start();
+require_once __DIR__ . '/../db_connect.php';
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -214,8 +218,6 @@
             }
         </style>
         <?php
-        session_start();
-        require_once __DIR__ . '/../db_connect.php';
 
         // Function to format student ID as YYYY-XXXXX
         function formatStudentId($id) {
