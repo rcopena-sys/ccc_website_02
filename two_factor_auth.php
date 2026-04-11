@@ -152,7 +152,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['verify_otp'])) {
                     // Match original post-login redirects from login_processing.php
                     switch ($role_id) {
                         case 1:
-                            $path = "super_admin/homepage.php";
+                            $path = "super_admin/dashboard.php";
                             break;
                         case 2:
                             $path = "adminpage/dashboard2.php";

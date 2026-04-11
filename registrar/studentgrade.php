@@ -449,10 +449,6 @@ if ($student_result) {
                 <i class="bi bi-table me-2"></i>
                 <?= $search_performed ? 'Search Results' : 'All Grades' ?>
             </h4>
-            <a href="addsturegs.php" class="btn btn-primary">
-                <i class="bi bi-plus-circle me-1"></i> Add New Grade
-            </a>
-        </div>
             <a href="upload_grades_csv.php" class="btn btn-success">
                 <i class="bi bi-file-earmark-arrow-up"></i> Upload CSV
             </a>

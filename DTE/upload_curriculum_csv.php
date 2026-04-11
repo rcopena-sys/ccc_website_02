@@ -1,6 +1,7 @@
 <?php
-// Correct DB path (adminpage → parent directory → db_connect.php)
+// Correct DB path (DTE → parent directory → db_connect.php)
 require_once '../db_connect.php';
+/** @var mysqli $conn */
 
 $message = '';
 $parsedRows = [];
@@ -9,6 +10,26 @@ $errors = [];
 $selectedProgram = $_POST['program'] ?? '';
 $selectedFiscalYear = $_POST['fiscal_year'] ?? '';
 $success = false;
+
+// Load available fiscal years from fiscal_years table (if it exists).
+// We follow the same convention as registrar/addsturegs.php, where the
+// human-readable fiscal year is stored in the `label` column.
+$availableFiscalYears = [];
+try {
+    $fyTableCheck = $conn->query("SHOW TABLES LIKE 'fiscal_years'");
+    if ($fyTableCheck instanceof mysqli_result && $fyTableCheck->num_rows > 0) {
+        $fyRes = $conn->query("SELECT label FROM fiscal_years ORDER BY start_date DESC, id DESC");
+        if ($fyRes instanceof mysqli_result) {
+            while ($fyRow = $fyRes->fetch_assoc()) {
+                if (!empty($fyRow['label'])) {
+                    $availableFiscalYears[] = $fyRow['label'];
+                }
+            }
+        }
+    }
+} catch (Exception $e) {
+    // Fall back to hardcoded list if table is missing or query fails
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
     $file = $_FILES['csv_file'];
@@ -23,14 +44,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
                 // Read header row
                 $header = fgetcsv($handle);
 
+                // Handle possible UTF-8 BOM on the first header cell (e.g. from Excel)
+                if (isset($header[0])) {
+                    $header[0] = preg_replace('/^\xEF\xBB\xBF/', '', $header[0]);
+                }
+
+                // Expected CSV header columns (displayed as-is in the UI)
                 $expectedCols = [
-                    'year_semester',
-                    'subject_code',
-                    'course_title',
-                    'lec_units',
-                    'lab_units',
-                    'total_units',
-                    'prerequisites'
+                    'Year_Semester',
+                    'Subject_Code',
+                    'Course_Title',
+                    'Lec_units',
+                    'Lab_units',
+                    'total_Units',
+                    'Prerequisites'
                 ];
 
                 $headerLower = array_map('strtolower', array_map('trim', $header));
@@ -51,32 +78,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
                     // Check whether curriculum table exists
                     $tableCheck = $conn->query("SHOW TABLES LIKE 'curriculum'");
                     
-                    if ($tableCheck->num_rows === 0) {
+                    if (!($tableCheck instanceof mysqli_result) || $tableCheck->num_rows === 0) {
                         $message = '<span class="text-red-600">The curriculum table does not exist. Run create_curriculum_table.php first.</span>';
                     } else {
 
                         // Clear old data for selected program + year
                         $deleteStmt = $conn->prepare("DELETE FROM curriculum WHERE program = ? AND fiscal_year = ?");
-                        $deleteStmt->bind_param("ss", $selectedProgram, $selectedFiscalYear);
-                        $deleteStmt->execute();
-                        $deleteStmt->close();
+                        if ($deleteStmt instanceof mysqli_stmt) {
+                            $deleteStmt->bind_param("ss", $selectedProgram, $selectedFiscalYear);
+                            $deleteStmt->execute();
+                            $deleteStmt->close();
+                        }
 
-                        // Prepare insert statement
-                        $stmt = $conn->prepare("
-                            INSERT INTO curriculum (
+                        // Determine actual code column name in curriculum
+                        // (some schemas may use subject_code instead).
+                        $codeColumn = 'course_code';
+                        try {
+                            $colRes = $conn->query("SHOW COLUMNS FROM curriculum");
+                            if ($colRes instanceof mysqli_result) {
+                                $cols = [];
+                                while ($c = $colRes->fetch_assoc()) {
+                                    $cols[] = $c['Field'];
+                                }
+                                if (!in_array('course_code', $cols, true) && in_array('subject_code', $cols, true)) {
+                                    $codeColumn = 'subject_code';
+                                }
+                            }
+                        } catch (Exception $e) {
+                            // Fallback to course_code if inspection fails
+                        }
+
+                        // Prepare insert statement using detected code column
+                        $sql = "INSERT INTO curriculum (
                                 fiscal_year,
                                 program,
                                 year_semester,
-                                subject_code,
+                                {$codeColumn},
                                 course_title,
                                 lec_units,
                                 lab_units,
                                 total_units,
                                 prerequisites
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ");
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                        $stmt = $conn->prepare($sql);
 
-                        if (!$stmt) {
+                        if (!($stmt instanceof mysqli_stmt)) {
                             $message = '<span class="text-red-600">Database prepare failed: ' . htmlspecialchars($conn->error) . '</span>';
                         } else {
 
@@ -90,26 +136,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
                                     continue;
                                 }
 
+                                // Sanitize key text fields (especially Year_Semester)
+                                $yearSemester = isset($row[0]) ? (string)$row[0] : '';
+                                // Remove Excel-style leading ="..." or ='... and surrounding quotes/apostrophes
+                                $yearSemester = preg_replace('/^=\s*"?(.+?)"?$/', '$1', $yearSemester);
+                                $yearSemester = ltrim($yearSemester, "='");
+                                $yearSemester = trim($yearSemester, " \t\n\r\0\x0B'\"");
+
+                                $subjectCode  = isset($row[1]) ? trim((string)$row[1]) : '';
+                                $courseTitle  = isset($row[2]) ? trim((string)$row[2]) : '';
+                                $prereqValue  = isset($row[6]) ? trim((string)$row[6]) : '';
+
                                 // Validate numeric fields
                                 $lec_units   = is_numeric($row[3]) ? floatval($row[3]) : 0;
                                 $lab_units   = is_numeric($row[4]) ? floatval($row[4]) : 0;
                                 $total_units = is_numeric($row[5]) ? floatval($row[5]) : 0;
 
                                 // Save row for preview
-                                $parsedRows[] = array_merge([$selectedFiscalYear, $selectedProgram], $row);
-
-                                // Bind parameters and execute
-                                $stmt->bind_param(
-                                    "ssss sddds",
+                                $parsedRows[] = [
                                     $selectedFiscalYear,
                                     $selectedProgram,
-                                    $row[0],
-                                    $row[1],
-                                    $row[2],
+                                    $yearSemester,
+                                    $subjectCode,
+                                    $courseTitle,
                                     $lec_units,
                                     $lab_units,
                                     $total_units,
-                                    $row[6]
+                                    $prereqValue,
+                                ];
+
+                                // Bind parameters and execute
+                                // Types: 5 strings (fiscal_year, program,
+                                // year_semester, course_code, course_title),
+                                // 3 doubles (lec, lab, total), 1 string (prereq)
+                                $stmt->bind_param(
+                                    "sssssddds",
+                                    $selectedFiscalYear,
+                                    $selectedProgram,
+                                    $yearSemester,
+                                    $subjectCode,
+                                    $courseTitle,
+                                    $lec_units,
+                                    $lab_units,
+                                    $total_units,
+                                    $prereqValue
                                 );
 
                                 if ($stmt->execute()) {
@@ -164,27 +234,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
 <body class="bg-gray-100 min-h-screen flex flex-col items-center justify-center">
     <div class="bg-white p-8 rounded shadow-md w-full max-w-xl mt-10">
         <h2 class="text-2xl font-bold mb-4">Upload Curriculum CSV</h2>
-        <?php if ($success === true): ?>
-            <div class="mb-4 p-4 rounded bg-green-100 text-green-800"> 
-                <?= $message ?> 
-            </div>
-        <?php elseif (!empty($error)): ?>
-            <div class="mb-4 p-4 rounded bg-red-100 text-red-800"> 
+        <?php if (!empty($message)): ?>
+            <div class="mb-4 p-4 rounded <?= $success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800' ?>"> 
                 <?= $message ?> 
             </div>
         <?php endif; ?>
         
         <div class="mb-6 p-4 bg-blue-100 text-blue-800 rounded">
             <h3 class="font-semibold mb-2">CSV Format Requirements:</h3>
-            <p class="text-sm">Your CSV file should have these columns in order:</p>
+            <p class="text-sm">Your CSV file should have these columns in order (header row):</p>
             <ul class="text-sm list-disc list-inside mt-1">
-                <li>year_semester (e.g., "1-1", "1-2", "2-1")</li>
-                <li>subject_code (e.g., "IT101")</li>
-                <li>course_title (e.g., "Introduction to IT")</li>
-                <li>lec_units (numeric, e.g., 3.0)</li>
-                <li>lab_units (numeric, e.g., 1.0)</li>
-                <li>total_units (numeric, e.g., 4.0)</li>
-                <li>prerequisites (text, e.g., "None" or "IT101")</li>
+                <li>Year_Semester (e.g., "1-1", "1-2", "2-1")</li>
+                <li>Subject_Code (e.g., "IT101")</li>
+                <li>Course_Title (e.g., "Introduction to IT")</li>
+                <li>Lec_units (numeric, e.g., 3.0)</li>
+                <li>Lab_units (numeric, e.g., 1.0)</li>
+                <li>total_Units (numeric, e.g., 4.0)</li>
+                <li>Prerequisites (text, e.g., "None" or "IT101")</li>
             </ul>
         </div>
         
@@ -198,10 +264,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
             <label class="block mb-2 font-semibold">Select Fiscal Year</label>
             <select name="fiscal_year" class="mb-4 w-full border rounded p-2" required>
                 <option value="">-- Select Fiscal Year --</option>
-                <option value="2022-2023" <?= $selectedFiscalYear==='2022-2023'?'selected':'' ?>>2022-2023</option>
-                <option value="2023-2024" <?= $selectedFiscalYear==='2023-2024'?'selected':'' ?>>2023-2024</option>
-                <option value="2024-2025" <?= $selectedFiscalYear==='2024-2025'?'selected':'' ?>>2024-2025</option>
-                <option value="2025-2026" <?= $selectedFiscalYear==='2025-2026'?'selected':'' ?>>2025-2026</option>
+                <?php if (!empty($availableFiscalYears)): ?>
+                    <?php foreach ($availableFiscalYears as $fy): ?>
+                        <option value="<?= htmlspecialchars($fy) ?>" <?= $selectedFiscalYear===$fy ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($fy) ?>
+                        </option>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <option value="2022-2023" <?= $selectedFiscalYear==='2022-2023'?'selected':'' ?>>2022-2023</option>
+                    <option value="2023-2024" <?= $selectedFiscalYear==='2023-2024'?'selected':'' ?>>2023-2024</option>
+                    <option value="2024-2025" <?= $selectedFiscalYear==='2024-2025'?'selected':'' ?>>2024-2025</option>
+                    <option value="2025-2026" <?= $selectedFiscalYear==='2025-2026'?'selected':'' ?>>2025-2026</option>
+                <?php endif; ?>
             </select>
             <input type="file" name="csv_file" accept=".csv" class="mb-4 block w-full border rounded p-2" required>
             <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">Upload</button>

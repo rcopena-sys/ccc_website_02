@@ -1034,9 +1034,63 @@ if (strpos($program, 'BSIT') !== false) {
 // Debug: Log the detected program
 error_log("Final program detected for student $studentId: '$program'");
 
+// Determine default fiscal year
 if ($fiscalYear === '') {
+  // 1) Try to get fiscal year from assign_curriculum for this program
+  try {
+    $tableCheck = $conn->query("SHOW TABLES LIKE 'assign_curriculum'");
+    if ($tableCheck && $tableCheck->num_rows > 0 && !empty($program)) {
+      // Prefer most recent assignment (by created_at / program_id) for this program
+      $fySql = "SELECT fiscal_year FROM assign_curriculum 
+            WHERE program = ? AND fiscal_year IS NOT NULL AND fiscal_year != ''
+            ORDER BY created_at DESC, program_id DESC LIMIT 1";
+      $fyStmt = $conn->prepare($fySql);
+      if ($fyStmt) {
+        $fyStmt->bind_param('s', $program);
+        $fyStmt->execute();
+        $fyRes = $fyStmt->get_result();
+        if ($fyRow = $fyRes->fetch_assoc()) {
+          $assignedFy = trim((string)($fyRow['fiscal_year'] ?? ''));
+          if ($assignedFy !== '') {
+            $fiscalYear = $assignedFy;
+            error_log("Using fiscal year from assign_curriculum for program $program: '$fiscalYear'");
+          }
+        }
+        $fyStmt->close();
+      }
+    }
+  } catch (Exception $e) {
+    error_log("Error getting fiscal year from assign_curriculum: " . $e->getMessage());
+  }
+
+  // 2) If still empty, fall back to latest fiscal year from curriculum table
+  if ($fiscalYear === '') {
     $fy = latestFiscalYear($conn, $program);
     if ($fy) $fiscalYear = $fy;
+  }
+}
+
+// Load available fiscal years from fiscal_years table (using `label` column)
+$availableFiscalYears = [];
+try {
+  $fyTableCheck = $conn->query("SHOW TABLES LIKE 'fiscal_years'");
+  if ($fyTableCheck instanceof mysqli_result && $fyTableCheck->num_rows > 0) {
+    $fyRes = $conn->query("SELECT label FROM fiscal_years ORDER BY start_date DESC, id DESC");
+    if ($fyRes instanceof mysqli_result) {
+      while ($fyRow = $fyRes->fetch_assoc()) {
+        if (!empty($fyRow['label'])) {
+          $availableFiscalYears[] = $fyRow['label'];
+        }
+      }
+    }
+  }
+} catch (Exception $e) {
+  // If table doesn't exist or query fails, the dropdown will just show the placeholder option.
+}
+
+// Ensure the currently selected fiscal year is present in the dropdown
+if ($fiscalYear !== '' && !in_array($fiscalYear, $availableFiscalYears, true)) {
+  array_unshift($availableFiscalYears, $fiscalYear);
 }
 
 // Fetch curriculum for program (optionally fiscal year)
@@ -1712,7 +1766,14 @@ foreach ($ysOrder as $ys) {
       <?php if (columnExists($conn, 'curriculum', 'fiscal_year')): ?>
       <div class="col-sm-3">
         <label class="form-label">Fiscal Year</label>
-        <input type="text" name="fiscal_year" class="form-control" value="<?= htmlspecialchars($fiscalYear) ?>" placeholder="e.g. 2024-2025">
+        <select name="fiscal_year" class="form-select">
+          <option value="">Select Fiscal Year...</option>
+          <?php foreach ($availableFiscalYears as $fyLabel): ?>
+            <option value="<?= htmlspecialchars($fyLabel) ?>" <?= $fiscalYear === $fyLabel ? 'selected' : '' ?>>
+              <?= htmlspecialchars($fyLabel) ?>
+            </option>
+          <?php endforeach; ?>
+        </select>
       </div>
       <?php endif; ?>
       <div class="col-sm-2">
@@ -1957,18 +2018,32 @@ foreach ($ysOrder as $ys) {
                 
                 // 3. Try pattern matching
                 if (empty($grade) && preg_match('/^([A-Za-z]+)[\s-]*(\d+[A-Za-z]*)$/', $irregular['code'], $matches)) {
-                    $prefix = strtoupper($matches[1]);
-                    $number = $matches[2];
-                    $pattern1 = $prefix . $number;
-                    $pattern2 = $prefix . '-' . $number;
-                    $pattern3 = $prefix . ' ' . $number;
+                  $prefix = strtoupper($matches[1]);
+                  $number = $matches[2];
+                  $pattern1 = $prefix . $number;
+                  $pattern2 = $prefix . '-' . $number;
+                  $pattern3 = $prefix . ' ' . $number;
                     
-                    foreach ([$pattern1, $pattern2, $pattern3] as $pattern) {
-                        if (isset($gradesByCode[$pattern])) {
-                            $grade = $gradesByCode[$pattern];
-                            break;
-                        }
+                  foreach ([$pattern1, $pattern2, $pattern3] as $pattern) {
+                    if (isset($gradesByCode[$pattern])) {
+                      $grade = $gradesByCode[$pattern];
+                      break;
                     }
+                  }
+                }
+
+                // 4. Try matching by course title (keep logic consistent with display rows)
+                if (empty($grade) && !empty($irregular['title'])) {
+                  $currentTitle = strtolower(trim($irregular['title']));
+                  foreach ($gradesByCode as $key => $value) {
+                    if (is_array($value) && !empty($value['course_title'])) {
+                      $gradeTitle = strtolower(trim($value['course_title']));
+                      if ($currentTitle === $gradeTitle) {
+                        $grade = $value;
+                        break;
+                      }
+                    }
+                  }
                 }
                 
                 // Only count for total if grade exists and is a passing grade
@@ -2017,18 +2092,32 @@ foreach ($ysOrder as $ys) {
                 
                 // 3. Try pattern matching
                 if (empty($grade) && preg_match('/^([A-Za-z]+)[\s-]*(\d+[A-Za-z]*)$/', $courseCode, $matches)) {
-                    $prefix = strtoupper($matches[1]);
-                    $number = $matches[2];
-                    $pattern1 = $prefix . $number;
-                    $pattern2 = $prefix . '-' . $number;
-                    $pattern3 = $prefix . ' ' . $number;
+                  $prefix = strtoupper($matches[1]);
+                  $number = $matches[2];
+                  $pattern1 = $prefix . $number;
+                  $pattern2 = $prefix . '-' . $number;
+                  $pattern3 = $prefix . ' ' . $number;
                     
-                    foreach ([$pattern1, $pattern2, $pattern3] as $pattern) {
-                        if (isset($gradesByCode[$pattern])) {
-                            $grade = $gradesByCode[$pattern];
-                            break;
-                        }
+                  foreach ([$pattern1, $pattern2, $pattern3] as $pattern) {
+                    if (isset($gradesByCode[$pattern])) {
+                      $grade = $gradesByCode[$pattern];
+                      break;
                     }
+                  }
+                }
+
+                // 4. Try matching by course title (same as row display)
+                if (empty($grade) && !empty($course['title'])) {
+                  $currentTitle = strtolower(trim($course['title']));
+                  foreach ($gradesByCode as $key => $value) {
+                    if (is_array($value) && !empty($value['course_title'])) {
+                      $gradeTitle = strtolower(trim($value['course_title']));
+                      if ($currentTitle === $gradeTitle) {
+                        $grade = $value;
+                        break;
+                      }
+                    }
+                  }
                 }
                 
                 // Only count units if grade exists and is a passing grade

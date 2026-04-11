@@ -1,3 +1,25 @@
+<?php
+require_once __DIR__ . '/../db_connect.php';
+/** @var mysqli $conn */
+
+// Load available fiscal years from fiscal_years table (using `label` column)
+$availableFiscalYears = [];
+try {
+    $fyTableCheck = $conn->query("SHOW TABLES LIKE 'fiscal_years'");
+    if ($fyTableCheck instanceof mysqli_result && $fyTableCheck->num_rows > 0) {
+        $fyRes = $conn->query("SELECT label FROM fiscal_years ORDER BY start_date DESC, id DESC");
+        if ($fyRes instanceof mysqli_result) {
+            while ($fyRow = $fyRes->fetch_assoc()) {
+                if (!empty($fyRow['label'])) {
+                    $availableFiscalYears[] = $fyRow['label'];
+                }
+            }
+        }
+    }
+} catch (Exception $e) {
+    // If table doesn't exist or query fails, the dropdown will just show the placeholder option.
+}
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -42,9 +64,6 @@
                 </div>
             </div>
         </nav>
-        <div class="mt-auto">
-            <a href="index.php" class="block py-2 px-4 bg-red-500 text-white rounded hover:bg-red-600 text-center">Logout</a>
-        </div>
     </aside>
 
     <!-- Main Content -->
@@ -86,18 +105,11 @@
                     </label>
                     <select name="fiscal_year" id="fiscal_year" class="w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
                         <option value="">Select fiscal year</option>
-                        <?php 
-                        $currentYear = (int)date('Y');
-                        $startYear = $currentYear - 5; // Show 5 years in the past
-                        $endYear = $currentYear + 5;   // And 5 years in the future
-                        
-                        for ($year = $startYear; $year <= $endYear; $year++) {
-                            $nextYear = $year + 1;
-                            $fiscalYear = "$year-$nextYear";
-                            $selected = ($year == $currentYear) ? 'selected' : '';
-                            echo "<option value='$fiscalYear' $selected>$fiscalYear</option>";
-                        }
-                        ?>
+                        <?php if (!empty($availableFiscalYears)): ?>
+                            <?php foreach ($availableFiscalYears as $fy): ?>
+                                <option value="<?php echo htmlspecialchars($fy); ?>"><?php echo htmlspecialchars($fy); ?></option>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
                     </select>
                 </div>
 

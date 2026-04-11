@@ -2987,15 +2987,36 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 // Check if adding this subject would exceed the limit
                 if (totalUnitsAfter > maxUnits) {
-                    const overBy = (totalUnitsAfter - maxUnits).toFixed(1);
+                  const overBy = (totalUnitsAfter - maxUnits).toFixed(1);
+                  if (typeof Swal !== 'undefined') {
+                    Swal.fire({
+                      icon: 'error',
+                      title: 'Unit Limit Exceeded',
+                      html: `
+                        <div style="text-align:left;">
+                          <p><strong>Cannot add subject:</strong> Unit limit would be exceeded.</p>
+                          <hr>
+                          <p><strong>Current units:</strong> ${currentUnits.toFixed(1)}</p>
+                          <p><strong>Adding:</strong> ${newUnits.toFixed(1)} units</p>
+                          <p><strong>Total after adding:</strong> ${totalUnitsAfter.toFixed(1)} units</p>
+                          <p><strong>Maximum allowed:</strong> ${maxUnits} units</p>
+                          <p><strong>Over limit by:</strong> ${overBy} units</p>
+                          <hr>
+                          <p>Please remove some subjects or choose a different semester.</p>
+                        </div>
+                      `,
+                      confirmButtonText: 'OK',
+                    });
+                  } else {
                     alert(`Cannot add subject: Unit limit would be exceeded.\n\n` +
-                        `Current units: ${currentUnits.toFixed(1)}\n` +
-                        `Adding: ${newUnits.toFixed(1)} units\n` +
-                        `Total: ${totalUnitsAfter.toFixed(1)} units\n` +
-                        `Maximum allowed: ${maxUnits} units\n` +
-                        `Over limit by: ${overBy} units\n\n` +
-                        `Please remove some subjects or choose a different semester.`);
-                    return;
+                      `Current units: ${currentUnits.toFixed(1)}\n` +
+                      `Adding: ${newUnits.toFixed(1)} units\n` +
+                      `Total: ${totalUnitsAfter.toFixed(1)} units\n` +
+                      `Maximum allowed: ${maxUnits} units\n` +
+                      `Over limit by: ${overBy} units\n\n` +
+                      `Please remove some subjects or choose a different semester.`);
+                  }
+                  return;
                 }
                 
                 // Create a new FormData object
@@ -3770,7 +3791,4 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 </body>
-</html> 
-</script>
-</body>
-</html>
+  </html>
