@@ -187,7 +187,7 @@ $total_count = $total_result ? (int)$total_result->fetch_assoc()['count'] : 0;
             <div class="label">Registrar</div>
             <a href="dashboardr.php" class="nav-link active">Dashboard</a>
             <a href="registrar.php" class="nav-link">Student List</a>
-           
+            <a href="student_evaluation.php" class="nav-link"><i class="fas fa-clipboard-check"></i> Student Evaluation</a>
             <a href="studentgrade.php" class="nav-link">Student Grade</a>
             <a href="fiscal_year.php" class="nav-link"><i class="fas fa-calendar"></i> Fiscal Year</a>
             <a href="feedbackr.php" class="nav-link">Feedback</a>
