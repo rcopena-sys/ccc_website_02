@@ -94,10 +94,10 @@ try {
                     </label>
                     <select name="program" id="program" class="w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
                         <option value="">Select a program</option>
-                        <option value="Bachelor Of Elementary Education">Bachelor Of Elementary Education</option>
-                        <option value="Bachelor Of Secondary Education Major In English">Bachelor Of Secondary Education Major In English</option>
-                        <option value="Bachelor Of Secondary Education Major In Mathematics">Bachelor Of Secondary Education Major In Mathematics</option>
-                        <option value="Bachelor Of Secondary Education Major In Science">Bachelor Of Secondary Education Major In Science</option>
+                        <option value="BEE">Bachelor Of Elementary Education</option>
+                        <option value="BSEME">Bachelor Of Secondary Education Major In English</option>
+                        <option value="BSEMM">Bachelor Of Secondary Education Major In Mathematics</option>
+                        <option value="BSEMS">Bachelor Of Secondary Education Major In Science</option>
                     </select>
                 </div>
 

@@ -1015,29 +1015,51 @@ if (empty($program) && !empty($studentId)) {
 }
 
 // Check for program in various formats and normalize to canonical labels
+// Map various text forms to the short program codes used in the
+// curriculum.program column: BEE, BSEME, BSEMM, BSEMS.
 $programRaw = trim($program);
 $normalizedProgram = strtoupper($programRaw);
+$normalizedNoSpace = str_replace([' ', '-', '_', '.'], '', $normalizedProgram);
 
-if (strpos($normalizedProgram, 'BACHELOR OF ELEMENTARY EDUCATION') !== false) {
-  $program = 'Bachelor Of Elementary Education';
-} elseif (strpos($normalizedProgram, 'BACHELOR OF SECONDARY EDUCATION MAJOR IN ENGLISH') !== false) {
-  $program = 'Bachelor Of Secondary Education Major In English';
-} elseif (strpos($normalizedProgram, 'BACHELOR OF SECONDARY EDUCATION MAJOR IN MATHEMATICS') !== false) {
-  $program = 'Bachelor Of Secondary Education Major In Mathematics';
-} elseif (strpos($normalizedProgram, 'BACHELOR OF SECONDARY EDUCATION MAJOR IN SCIENCE') !== false) {
-  $program = 'Bachelor Of Secondary Education Major In Science';
+if (
+    strpos($normalizedProgram, 'BACHELOR OF ELEMENTARY EDUCATION') !== false ||
+    in_array($normalizedNoSpace, ['BEE', 'BEED'], true)
+) {
+  // BEE → Bachelor Of Elementary Education
+  $program = 'BEE';
+} elseif (
+    strpos($normalizedProgram, 'BACHELOR OF SECONDARY EDUCATION MAJOR IN ENGLISH') !== false ||
+    strpos($normalizedProgram, 'BSED MAJOR IN ENGLISH') !== false ||
+    in_array($normalizedNoSpace, ['BSEME', 'BSEDENGLISH'], true)
+) {
+  // BSEME → Bachelor Of Secondary Education Major In English
+  $program = 'BSEME';
+} elseif (
+    strpos($normalizedProgram, 'BACHELOR OF SECONDARY EDUCATION MAJOR IN MATHEMATICS') !== false ||
+    strpos($normalizedProgram, 'BSED MAJOR IN MATHEMATICS') !== false ||
+    in_array($normalizedNoSpace, ['BSEMM', 'BSEDMATH', 'BSEDMATHEMATICS'], true)
+) {
+  // BSEMM → Bachelor Of Secondary Education Major In Mathematics
+  $program = 'BSEMM';
+} elseif (
+    strpos($normalizedProgram, 'BACHELOR OF SECONDARY EDUCATION MAJOR IN SCIENCE') !== false ||
+    strpos($normalizedProgram, 'BSED MAJOR IN SCIENCE') !== false ||
+    in_array($normalizedNoSpace, ['BSEMS', 'BSEDSCIENCE'], true)
+) {
+  // BSEMS → Bachelor Of Secondary Education Major In Science
+  $program = 'BSEMS';
 } else {
   // For DTE, treat other programs (BSIT/BSCS/etc.) as not allowed
   error_log("Warning: Non-DTE program for student $studentId. Raw program value: " . ($programRaw ?: 'empty'));
   $program = $programRaw; // keep original text for logging; eligibility handled below
 }
 
-// Only these Teacher Education programs are allowed on this page
+// Only these Teacher Education program codes are allowed on this page
 $allowedPrograms = [
-  'Bachelor Of Elementary Education',
-  'Bachelor Of Secondary Education Major In English',
-  'Bachelor Of Secondary Education Major In Mathematics',
-  'Bachelor Of Secondary Education Major In Science',
+  'BEE',   // Bachelor Of Elementary Education
+  'BSEME', // BSE Major In English
+  'BSEMM', // BSE Major In Mathematics
+  'BSEMS', // BSE Major In Science
 ];
 
 $isEligibleProgram = in_array($program, $allowedPrograms, true);

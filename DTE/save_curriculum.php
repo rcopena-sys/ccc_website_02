@@ -101,7 +101,7 @@ try {
     // Commit transaction
     $conn->commit();
 
-    // Redirect based on program
+    // Redirect based on program (support both short codes and legacy names)
     switch ($program) {
         case 'BSCS':
             $redirect_page = 'curi_cs.php';
@@ -109,15 +109,19 @@ try {
         case 'BSIT':
             $redirect_page = 'curi_it.php';
             break;
+        case 'BEE':
         case 'Bachelor Of Elementary Education':
             $redirect_page = 'bee.php';
             break;
+        case 'BSEME':
         case 'Bachelor Of Secondary Education Major In English':
             $redirect_page = 'bseme.php';
             break;
+        case 'BSEMM':
         case 'Bachelor Of Secondary Education Major In Mathematics':
             $redirect_page = 'bsemm.php';
             break;
+        case 'BSEMS':
         case 'Bachelor Of Secondary Education Major In Science':
             $redirect_page = 'bsems.php';
             break;

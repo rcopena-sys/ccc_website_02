@@ -134,13 +134,15 @@ try {
 
     if ($selected_fiscal_year) {
       // For a specific fiscal year, count how many TE programs have curriculum rows
+      // Support both legacy long names and new short codes (BEE, BSEME, BSEMM, BSEMS)
       $curriculum_sql = "SELECT COUNT(DISTINCT program) AS count
         FROM curriculum
         WHERE program IN (
           'Bachelor Of Elementary Education',
           'Bachelor Of Secondary Education Major In English',
           'Bachelor Of Secondary Education Major In Mathematics',
-          'Bachelor Of Secondary Education Major In Science'
+          'Bachelor Of Secondary Education Major In Science',
+          'BEE', 'BSEME', 'BSEMM', 'BSEMS'
         )
         AND fiscal_year = '" . $escaped_year . "'";
 
@@ -150,6 +152,7 @@ try {
       }
     } else {
       // Across all years, sum distinct TE programs per fiscal year
+      // Support both legacy long names and new short codes (BEE, BSEME, BSEMM, BSEMS)
       $curriculum_stats = [];
       $curriculum_result = $conn->query("SELECT fiscal_year, COUNT(DISTINCT program) AS count
         FROM curriculum
@@ -157,7 +160,8 @@ try {
           'Bachelor Of Elementary Education',
           'Bachelor Of Secondary Education Major In English',
           'Bachelor Of Secondary Education Major In Mathematics',
-          'Bachelor Of Secondary Education Major In Science'
+          'Bachelor Of Secondary Education Major In Science',
+          'BEE', 'BSEME', 'BSEMM', 'BSEMS'
         )
         AND fiscal_year IS NOT NULL AND fiscal_year != ''
         GROUP BY fiscal_year
@@ -434,9 +438,10 @@ $conn->close();
         <div id="curriculumDropdownMenu" class="hidden absolute left-0 w-full z-10 flex flex-col bg-white border border-blue-200 rounded shadow-lg mt-1">
 		  <a href="bee.php" class="py-2 px-6 text-blue-800 hover:bg-blue-50 border-b border-blue-100 first:rounded-t">Bachelor Of Elementary Education</a>
 		  <a href="bseme.php" class="py-2 px-6 text-blue-800 hover:bg-blue-50 border-b border-blue-100">Bachelor Of Secondary Education Major In English</a>
-		  <a href="bsemm.php" class="py-2 px-6 text-blue-800 hover:bg-blue-50 border-b border-blue-100">Bachelor Of Secondary Education Major In Ma
+		  <a href="bsemm.php" class="py-2 px-6 text-blue-800 hover:bg-blue-50 border-b border-blue-100">Bachelor Of Secondary Education Major In Mathematics</a>
+     <a href="bsems.php" class="py-2 px-6 text-blue-800 hover:bg-blue-50 last:rounded-b">Bachelor Of Secondary Education Major In Science</a>
         
-      -2 px-6 text-blue-800 hover:bg-blue-50 last:rounded-b">Bachelor Of Secondary Education Major In Science</a>
+      
         </div>
       </div>
 

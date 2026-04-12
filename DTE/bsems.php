@@ -5,6 +5,16 @@ require_once __DIR__ . '/../db_connect.php';
 // Get selected fiscal year
 $selectedFiscalYear = isset($_GET['fiscal_year']) ? $_GET['fiscal_year'] : '';
 
+// Load available fiscal years for this program from curriculum table
+$availableFiscalYears = [];
+$fySql = "SELECT DISTINCT fiscal_year FROM curriculum WHERE program = 'BSEMS' AND fiscal_year IS NOT NULL AND fiscal_year <> '' ORDER BY fiscal_year DESC";
+if ($fyResult = $conn->query($fySql)) {
+    while ($fyRow = $fyResult->fetch_assoc()) {
+        $availableFiscalYears[] = $fyRow['fiscal_year'];
+    }
+    $fyResult->free();
+}
+
 // Improved normalization function for year_semester
 function normalizeSemesterKey($raw) {
     $raw = strtolower(trim($raw));
@@ -30,7 +40,7 @@ function normalizeSemesterKey($raw) {
 // Fetch curriculum data for Bachelor Of Secondary Education Major In Science
 $curriculumData = [];
 if ($selectedFiscalYear) {
-    $sql = "SELECT * FROM curriculum WHERE program = 'Bachelor Of Secondary Education Major In Science' AND fiscal_year = ? ORDER BY year_semester, course_code";
+    $sql = "SELECT * FROM curriculum WHERE program = 'BSEMS' AND fiscal_year = ? ORDER BY year_semester, course_code";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param("s", $selectedFiscalYear);
     $stmt->execute();
@@ -167,15 +177,9 @@ function generateTableBody($semesterKey, $curriculumData) {
         <select name="fiscal_year" class="mb-4 w-full border rounded p-2 max-w-xs inline-block" onchange="this.form.submit()" required>
             <option value="">-- Select Fiscal Year --</option>
             <?php 
-            $currentYear = (int)date('Y');
-            $startYear = $currentYear - 5; 
-            $endYear = $currentYear + 5;
-            
-            for ($year = $startYear; $year <= $endYear; $year++) {
-                $nextYear = $year + 1;
-                $fiscalYear = "$year-$nextYear";
-                $selected = (isset($_GET['fiscal_year']) && $_GET['fiscal_year'] === $fiscalYear) ? 'selected' : '';
-                echo "<option value='$fiscalYear' $selected>$fiscalYear</option>";
+            foreach ($availableFiscalYears as $fy) {
+                $selected = ($selectedFiscalYear === $fy) ? 'selected' : '';
+                echo "<option value='" . htmlspecialchars($fy, ENT_QUOTES, 'UTF-8') . "' $selected>" . htmlspecialchars($fy) . "</option>";
             }
             ?>
         </select>
