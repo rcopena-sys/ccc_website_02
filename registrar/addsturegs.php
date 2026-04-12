@@ -1,6 +1,12 @@
 <?php
 include 'db.php';
 
+// Flags/messages for SweetAlert feedback
+$uploadSuccess = false;
+$uploadMessage = '';
+$registerSuccess = false;
+$registerMessage = '';
+
 // Function to format student ID as YYYY-NNNNN
 function formatStudentId($id) {
     // Remove all non-digit characters
@@ -48,6 +54,121 @@ if (isset($_GET['check_student_id'])) {
     echo json_encode([ 'exists' => $exists, 'student_id' => $student_id ]);
     $conn->close();
     exit();
+}
+
+// Handle CSV upload from the "Upload Students via CSV" form on this page
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['csv_file'])) {
+    set_time_limit(300);
+
+    if (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
+        echo "<script>alert('Failed to upload CSV file.'); window.history.back();</script>";
+        exit();
+    }
+
+    $file = $_FILES['csv_file']['tmp_name'];
+    $handle = fopen($file, 'r');
+    if (!$handle) {
+        echo "<script>alert('Failed to open CSV file.'); window.history.back();</script>";
+        exit();
+    }
+
+    // Skip header row
+    fgetcsv($handle);
+
+    $success = 0;
+    $fail = 0;
+
+    $conn->begin_transaction();
+
+    while (($data = fgetcsv($handle, 1000, ',')) !== false) {
+        // Expect columns (from template):
+        // 0: Student ID
+        // 1: Student Name
+        // 2: Curriculum
+        // 3: Classification
+        // 4: Category (ignored for students_db; no column)
+        // 5: Programs
+        // 6: Academic Year
+        // 7: Fiscal Year
+        // 8: Semester
+        // 9: Status
+        // 10: Gender
+        if (count($data) < 11) {
+            $fail++;
+            continue;
+        }
+
+        $raw_student_id  = trim($data[0]);
+        $student_id      = formatStudentId($raw_student_id);
+        $student_name    = trim($data[1]);
+        $curriculum      = trim($data[2]);
+        $classification  = trim($data[3]);
+        $category        = trim($data[4]); // not stored in students_db
+        $programs        = trim($data[5]);
+        $academic_year   = trim($data[6]);
+        $fiscal_year     = trim($data[7]);
+        $semester        = trim($data[8]);
+        $status          = trim($data[9]);
+        $gender          = trim($data[10]);
+
+        // Basic validation for required fields (email is not in CSV)
+        if (empty($student_id) || empty($student_name) || empty($curriculum) || empty($classification) || empty($programs) || empty($academic_year) || empty($semester) || empty($status) || empty($gender) || empty($fiscal_year)) {
+            $fail++;
+            continue;
+        }
+
+        // Accept either YYYY-NNNNN or 6-digit ID, consistent with manual add
+        if (!preg_match('/^(\d{4}-?\d{5}|\d{6})$/', $student_id)) {
+            $fail++;
+            continue;
+        }
+
+        // Check if student already exists
+        $check_stmt = $conn->prepare("SELECT student_id FROM students_db WHERE student_id = ?");
+        if (!$check_stmt) {
+            $fail++;
+            continue;
+        }
+        $check_stmt->bind_param("s", $student_id);
+        $check_stmt->execute();
+        $check_stmt->store_result();
+
+        if ($check_stmt->num_rows > 0) {
+            // Update existing record (do not touch email; table has no category column)
+            $stmt = $conn->prepare("UPDATE students_db SET student_name = ?, curriculum = ?, classification = ?, programs = ?, academic_year = ?, semester = ?, status = ?, gender = ?, fiscal_year = ? WHERE student_id = ?");
+            if (!$stmt) {
+                $check_stmt->close();
+                $fail++;
+                continue;
+            }
+            $stmt->bind_param("ssssssssss", $student_name, $curriculum, $classification, $programs, $academic_year, $semester, $status, $gender, $fiscal_year, $student_id);
+        } else {
+            // Insert new record (email left NULL/default)
+            $stmt = $conn->prepare("INSERT INTO students_db (student_id, student_name, curriculum, classification, programs, academic_year, semester, status, gender, fiscal_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            if (!$stmt) {
+                $check_stmt->close();
+                $fail++;
+                continue;
+            }
+            $stmt->bind_param("ssssssssss", $student_id, $student_name, $curriculum, $classification, $programs, $academic_year, $semester, $status, $gender, $fiscal_year);
+        }
+
+        $check_stmt->close();
+
+        if ($stmt->execute()) {
+            $success++;
+        } else {
+            $fail++;
+        }
+        $stmt->close();
+    }
+
+    fclose($handle);
+    $conn->commit();
+
+    // Record success message for SweetAlert in the HTML section
+    $uploadSuccess = true;
+    $uploadMessage = "$success students processed, $fail failed.";
 }
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
@@ -182,7 +303,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
             $curStmt->close();
         }
 
-        echo "<script>alert('Student registered successfully!'); window.location.href='registrar.php';</script>";
+        // Record success message for SweetAlert in the HTML section
+        $registerSuccess = true;
+        $registerMessage = 'Student registered successfully!';
     } else {
         // Extra safety: if a UNIQUE index exists on student_id,
         // catch database duplicate-key errors and show a clear message.
@@ -193,7 +316,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
         }
     }
     $stmt->close();
-    $conn->close();
 }
 
 // Fetch distinct curriculum options based on existing assignments (assign_curriculum table)
@@ -221,6 +343,7 @@ if ($conn && $conn->connect_errno === 0) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Add Student</title> <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
         body { font-family: Arial, sans-serif; background: #f9f9f9; }
         .container { max-width: 500px; margin: 40px auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.07); }
@@ -354,7 +477,7 @@ if ($conn && $conn->connect_errno === 0) {
                 <i class="bi bi-download me-2"></i>Download Sample CSV
             </a>
         </div>
-        <form action="bulk.php" method="post" enctype="multipart/form-data">
+        <form action="" method="post" enctype="multipart/form-data">
             <div class="mb-3">
                 <label for="csv_file" class="form-label">Select CSV File</label>
                 <input type="file" class="form-control" name="csv_file" id="csv_file" accept=".csv" required>
@@ -448,5 +571,26 @@ if ($conn && $conn->connect_errno === 0) {
             }
         });
     </script>
+
+<?php
+// Trigger SweetAlert if there was a successful CSV upload or manual registration
+if ($uploadSuccess || $registerSuccess):
+    $msg = $uploadSuccess ? $uploadMessage : $registerMessage;
+    $title = $uploadSuccess ? 'Upload complete' : 'Student registered';
+    $msgJs = json_encode($msg, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $titleJs = json_encode($title, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+?>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            Swal.fire({
+                icon: 'success',
+                title: <?php echo $titleJs; ?>,
+                text: <?php echo $msgJs; ?>
+            }).then(function () {
+                window.location.href = 'registrar.php';
+            });
+        });
+    </script>
+<?php endif; ?>
 </body>
 </html>
