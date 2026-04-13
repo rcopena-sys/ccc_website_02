@@ -3384,7 +3384,8 @@ document.addEventListener('DOMContentLoaded', function() {
       return;
     }
 
-    const url = `./stueval.php?action=get_irregular&student_id=${encodeURIComponent(studentId)}&ys=${encodeURIComponent(ys)}`;
+    // Call this same page for irregular-subject data so we get pure JSON
+    const url = `student_evaluation.php?action=get_irregular&student_id=${encodeURIComponent(studentId)}&ys=${encodeURIComponent(ys)}`;
     console.log('Fetching irregular subjects from:', url);
     
     fetch(url)
@@ -3500,8 +3501,8 @@ document.addEventListener('DOMContentLoaded', function() {
       return;
     }
     
-    // Send delete request - try GET instead of POST
-    fetch(`./stueval.php?action=delete_irregular&id=${encodeURIComponent(id)}`, {
+    // Send delete request to this same page so it returns JSON only
+    fetch(`student_evaluation.php?action=delete_irregular&id=${encodeURIComponent(id)}`, {
       method: 'GET'
     })
     .then(response => {
@@ -4021,7 +4022,8 @@ document.addEventListener('DOMContentLoaded', function() {
             yearSem: yearSem
         });
         
-        fetch('stueval.php', {
+        // Use this same PHP file for bulk irregular save (it has the handler at the top)
+        fetch('student_evaluation.php', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

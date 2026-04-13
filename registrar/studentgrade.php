@@ -29,7 +29,7 @@ if (!empty($_GET['search_student']) || !empty($_GET['search_course'])) {
     }
     
     if (!empty($where_conditions)) {
-        $sql = "SELECT * FROM grades_db WHERE " . implode(' AND ', $where_conditions) . " ORDER BY student_id, course_code";
+        $sql = "SELECT * FROM grades_db WHERE " . implode(' AND ', $where_conditions) . " ORDER BY student_id, year, sem, course_code";
         $stmt = $conn->prepare($sql);
         
         if ($stmt && !empty($params)) {
@@ -145,9 +145,11 @@ if ($course_result) {
     }
 }
 
-// Get student IDs for dropdown
+// Get student IDs for dropdown (include archived so they remain searchable)
 $student_ids = [];
-$student_result = $conn->query("SELECT DISTINCT student_id FROM grades_db ORDER BY student_id");
+// Ensure archive table exists so UNION query is safe
+$conn->query("CREATE TABLE IF NOT EXISTS grades_archive LIKE grades_db");
+$student_result = $conn->query("(SELECT DISTINCT student_id FROM grades_db) UNION (SELECT DISTINCT student_id FROM grades_archive) ORDER BY student_id");
 if ($student_result) {
     while ($row = $student_result->fetch_assoc()) {
         $student_ids[] = $row['student_id'];
@@ -237,7 +239,7 @@ if ($student_result) {
                     </thead>
                     <tbody>
                     <?php
-                    $display_data = $search_performed ? $search_results : $conn->query("SELECT * FROM grades_db ORDER BY student_id, course_code")->fetch_all(MYSQLI_ASSOC);
+                    $display_data = $search_performed ? $search_results : $conn->query("SELECT * FROM grades_db ORDER BY student_id, year, sem, course_code")->fetch_all(MYSQLI_ASSOC);
                     
                     if (!empty($display_data)):
                         foreach ($display_data as $row): 

@@ -1356,6 +1356,96 @@ if ($studentId !== '') {
         }
 }
 
+      // Global rule for Capstone Project 1 eligibility:
+      // Student must have PASSED all subjects ("major" subjects) that themselves
+      // have a prerequisite, but only for semesters BEFORE Capstone Project 1.
+      // Subjects whose own prereq is NONE/N/A/- are treated as minor and may be
+      // failed without blocking Capstone 1.
+      $allMajorWithPrereqPassed = true;
+      if (!empty($curriculum) && $studentId !== '') {
+        $capstoneYs = [];
+
+        // 1) Find the semester key(s) (ys like "3-2") where Capstone Project 1 exists.
+        foreach ($curriculum as $ysKey => $semesterCourses) {
+          foreach ($semesterCourses as $course) {
+            $courseTitle = $course['title'] ?? '';
+            if (!empty($courseTitle) && stripos($courseTitle, 'capstone project 1') !== false) {
+              $capstoneYs[] = $ysKey;
+            }
+          }
+        }
+
+        if (!empty($capstoneYs)) {
+          // Use the earliest Capstone 1 semester (e.g., 3-2) as the cutoff.
+          sort($capstoneYs);
+          $capYs = $capstoneYs[0];
+          [$capYear, $capSem] = array_map('intval', explode('-', $capYs));
+
+          // 2) For all curriculum subjects BEFORE Capstone 1's semester, enforce
+          // that any subject which itself has a prereq must be passed.
+          foreach ($curriculum as $ysKey => $semesterCourses) {
+            // Parse current semester key like "1-1", "2-2".
+            [$curYear, $curSem] = array_map('intval', explode('-', $ysKey));
+
+            // Only enforce rule for semesters strictly before Capstone 1.
+            if ($curYear > $capYear || ($curYear === $capYear && $curSem >= $capSem)) {
+              continue;
+            }
+
+            foreach ($semesterCourses as $course) {
+              $courseTitle = $course['title'] ?? '';
+              $courseCode  = $course['code']  ?? '';
+              $coursePrereqRaw = strtolower(trim($course['prereq'] ?? ''));
+
+              // Skip subjects whose own prerequisite is effectively "none";
+              // these are treated as minor and may be failed without blocking Capstone.
+              if ($coursePrereqRaw === '' || in_array($coursePrereqRaw, ['none','n/a','-','none '], true)) {
+                continue;
+              }
+
+              // Skip Capstone Project 1 itself when computing the global rule.
+              if (!empty($courseTitle) && stripos($courseTitle, 'capstone project 1') !== false) {
+                continue;
+              }
+
+              $normCourseCode = normalizeCourseCode($courseCode);
+              if ($normCourseCode === '') {
+                continue;
+              }
+
+              // Look up the student's grade for this subject.
+              $gradeValue = $gradesByCode[$normCourseCode] ?? null;
+
+              // No grade at all for a major subject with a prerequisite → blocks Capstone 1.
+              if ($gradeValue === null || $gradeValue === '') {
+                $allMajorWithPrereqPassed = false;
+                error_log("Capstone rule: missing grade for major subject $courseCode (prereq=$coursePrereqRaw) before Capstone 1 (ys=$capYs) → blocking Capstone 1");
+                break 2;
+              }
+
+              // Normalize and check if the grade is passing.
+              if (is_numeric($gradeValue)) {
+                $gv = (float)$gradeValue;
+                // In this system, numeric grades <= 3.25 are treated as passed.
+                if ($gv > 3.25) {
+                  $allMajorWithPrereqPassed = false;
+                  error_log("Capstone rule: failing/INC grade $gv for major subject $courseCode before Capstone 1 (ys=$capYs) → blocking Capstone 1");
+                  break 2;
+                }
+              } elseif (is_string($gradeValue)) {
+                $gUpper = strtoupper(trim($gradeValue));
+                // Text grades like INC / FAILED also block Capstone 1.
+                if (in_array($gUpper, ['INC','FAILED','FAIL'], true)) {
+                  $allMajorWithPrereqPassed = false;
+                  error_log("Capstone rule: non-passing text grade '$gUpper' for major subject $courseCode before Capstone 1 (ys=$capYs) → blocking Capstone 1");
+                  break 2;
+                }
+              }
+            }
+          }
+        }
+      }
+
 $ysOrder = ['1-1','1-2','2-1','2-2','3-1','3-2','4-1','4-2'];
 
 // Dynamically compute the maximum units per semester from the curriculum table
@@ -2364,6 +2454,10 @@ if (!empty($curriculum)) {
                   // this flag controls whether the subject should be blocked
                   // for clicking even if the student is classified as Regular.
                   $regularPrereqBlocked = false;
+                  // Special flag: block Capstone Project 1 when not all
+                  // major (with-prerequisite) subjects are passed.
+                  $isCapstone1 = !empty($subj['title']) && stripos($subj['title'], 'capstone project 1') !== false;
+                  $capstoneBlockedByMajors = false;
                   
                   // Handle grade value extraction from array or direct value
                   $gradeValue = '';
@@ -2405,6 +2499,12 @@ if (!empty($curriculum)) {
                   $showButtons = shouldShowButtons($code, $displayGrade, $prereq, $curriculum, $gradesByCode);
                   
                   error_log("DEBUG: Final showButtons result for $code: " . ($showButtons ? 'true' : 'false'));
+
+                    // Apply the global Capstone 1 rule to this specific row
+                    if ($isCapstone1 && !$allMajorWithPrereqPassed) {
+                      $capstoneBlockedByMajors = true;
+                      error_log("Capstone Project 1 row: blocking selection because not all major (with-prerequisite) subjects are passed for student $studentId.");
+                    }
                   
                   
                   // Check if student is regular
@@ -2446,29 +2546,14 @@ if (!empty($curriculum)) {
                       // If student is any "Regular" classification, they should NOT be blocked
                       if ($isDirectRegular) {
                           // For classification prerequisites (Regular, Regular 3rd Year, Regular 4th Year)
-                          // require that key earlier semesters have at least one passed subject
-                          // before allowing the subject to be clickable.
+                          // we now treat the prerequisite as satisfied for Regular students
+                          // and do NOT block them based on internal semester checks. This
+                          // ensures graduating/regular students (e.g. in 3-2, 4-1, 4-2) can
+                          // freely take subjects whose PRE-REQ is "Regular".
                           if ($isClassificationPrereq) {
-                            $requiredRegularSemesters = ['1-1','1-2','2-1','2-2','3-1'];
-                            $allRequiredPassed = true;
-                            foreach ($requiredRegularSemesters as $reqYs) {
-                              if (empty($passedBySemester[$reqYs])) {
-                                $allRequiredPassed = false;
-                                break;
-                              }
-                            }
-
-                            if ($allRequiredPassed) {
                               $prereqFailed = false;
                               $regularPrereqBlocked = false;
-                              error_log("DEBUG: Regular student meets Regular classification prerequisite based on passed semesters.");
-                            } else {
-                              // Keep prereqFailed as-is so row styling doesn't
-                              // mark it as prereq-failed for Regular students,
-                              // but block the checkbox via regularPrereqBlocked.
-                              $regularPrereqBlocked = true;
-                              error_log("DEBUG: Regular student missing passed grades in required semesters for Regular prerequisite; blocking click.");
-                            }
+                              error_log("DEBUG: Regular student automatically satisfies classification prerequisite; no blocking.");
                           } else {
                               // For regular course prerequisites, check normally
                               $prereqCodes = array_map('trim', explode(',', $prereq));
@@ -2607,7 +2692,45 @@ if (!empty($curriculum)) {
                       !$hasFirstYearFirstSemGrade
                     );
                     ?>
-                    <?php if ($needsFirstYearFirstSemBlock): ?>
+                    <?php if ($isPassed): ?>
+                      <span style="color: #28a745; font-size: 1.2em; font-weight: bold;">✓</span>
+                      <input type="checkbox" class="form-check-input subject-checkbox" 
+                             value="<?= htmlspecialchars($code) ?>"
+                             data-title="<?= htmlspecialchars($subj['title']) ?>"
+                             data-units="<?= htmlspecialchars($subj['units'] ?? '3') ?>"
+                             data-lec="<?= htmlspecialchars($subj['lec'] ?? '0') ?>"
+                             data-lab="<?= htmlspecialchars($subj['lab'] ?? '0') ?>"
+                             data-prereq="<?= htmlspecialchars($subj['prereq'] ?? '') ?>"
+                             data-year="<?= $yr ?>"
+                             data-sem="<?= $sm ?>"
+                             disabled
+                             title="This subject has already been passed">
+                    <?php elseif ($isFailed): ?>
+                      <span style="color: #e63e3eff; font-size: 1.2em; font-weight: bold;">✗</span>
+                      <input type="checkbox" class="form-check-input subject-checkbox" 
+                             value="<?= htmlspecialchars($code) ?>"
+                             data-title="<?= htmlspecialchars($subj['title']) ?>"
+                             data-units="<?= htmlspecialchars($subj['units'] ?? '3') ?>"
+                             data-lec="<?= htmlspecialchars($subj['lec'] ?? '0') ?>"
+                             data-lab="<?= htmlspecialchars($subj['lab'] ?? '0') ?>"
+                             data-prereq="<?= htmlspecialchars($subj['prereq'] ?? '') ?>"
+                             data-year="<?= $yr ?>"
+                             data-sem="<?= $sm ?>"
+                             title="This subject needs to be retaken">
+                    <?php elseif ($isCapstone1 && $capstoneBlockedByMajors): ?>
+                      <span style="color: #e63e3eff; font-size: 1.2em; font-weight: bold;" title="Cannot select Capstone Project 1: you must pass all subjects that have prerequisites.">✗</span>
+                      <input type="checkbox" class="form-check-input subject-checkbox" 
+                             value="<?= htmlspecialchars($code) ?>"
+                             data-title="<?= htmlspecialchars($subj['title']) ?>"
+                             data-units="<?= htmlspecialchars($subj['units'] ?? '3') ?>"
+                             data-lec="<?= htmlspecialchars($subj['lec'] ?? '0') ?>"
+                             data-lab="<?= htmlspecialchars($subj['lab'] ?? '0') ?>"
+                             data-prereq="<?= htmlspecialchars($subj['prereq'] ?? '') ?>"
+                             data-year="<?= $yr ?>"
+                             data-sem="<?= $sm ?>"
+                             disabled
+                             style="display: none;">
+                    <?php elseif ($needsFirstYearFirstSemBlock): ?>
                       <span style="color: #e63e3eff; font-size: 1.2em; font-weight: bold;" title="Cannot select: no subjects in First Year • First Semester.">✗</span>
                       <input type="checkbox" class="form-check-input subject-checkbox" 
                              value="<?= htmlspecialchars($code) ?>"
@@ -2647,7 +2770,7 @@ if (!empty($curriculum)) {
                              data-sem="<?= $sm ?>"
                              disabled
                              style="display: none;">
-                    <?php elseif ($isInIrregularDb && !$isFailed): ?>
+                    <?php elseif ($isInIrregularDb): ?>
                       <span style="color: #6c757d; font-size: 1.2em; font-weight: bold;">✓</span>
                       <input type="checkbox" class="form-check-input subject-checkbox" 
                              value="<?= htmlspecialchars($code) ?>"
@@ -2660,31 +2783,6 @@ if (!empty($curriculum)) {
                              data-sem="<?= $sm ?>"
                              disabled
                              title="This subject is already in irregular subjects">
-                    <?php elseif ($isFailed): ?>
-                      <span style="color: #e63e3eff; font-size: 1.2em; font-weight: bold;">✗</span>
-                      <input type="checkbox" class="form-check-input subject-checkbox" 
-                             value="<?= htmlspecialchars($code) ?>"
-                             data-title="<?= htmlspecialchars($subj['title']) ?>"
-                             data-units="<?= htmlspecialchars($subj['units'] ?? '3') ?>"
-                             data-lec="<?= htmlspecialchars($subj['lec'] ?? '0') ?>"
-                             data-lab="<?= htmlspecialchars($subj['lab'] ?? '0') ?>"
-                             data-prereq="<?= htmlspecialchars($subj['prereq'] ?? '') ?>"
-                             data-year="<?= $yr ?>"
-                             data-sem="<?= $sm ?>"
-                             title="This subject needs to be retaken">
-                    <?php elseif ($isPassed): ?>
-                      <span style="color: #28a745; font-size: 1.2em; font-weight: bold;">✓</span>
-                      <input type="checkbox" class="form-check-input subject-checkbox" 
-                             value="<?= htmlspecialchars($code) ?>"
-                             data-title="<?= htmlspecialchars($subj['title']) ?>"
-                             data-units="<?= htmlspecialchars($subj['units'] ?? '3') ?>"
-                             data-lec="<?= htmlspecialchars($subj['lec'] ?? '0') ?>"
-                             data-lab="<?= htmlspecialchars($subj['lab'] ?? '0') ?>"
-                             data-prereq="<?= htmlspecialchars($subj['prereq'] ?? '') ?>"
-                             data-year="<?= $yr ?>"
-                             data-sem="<?= $sm ?>"
-                             disabled
-                             title="This subject has already been passed">
                     <?php else: ?>
                       <input type="checkbox" class="form-check-input subject-checkbox" 
                              value="<?= htmlspecialchars($code) ?>"
@@ -2701,13 +2799,7 @@ if (!empty($curriculum)) {
                       style="padding: 12px 8px; <?= ($prereqFailed && !$isRegular) ? 'background-color: transparent !important; color: #c62828 !important;' : '' ?>" 
                       data-code="<?= htmlspecialchars(normalizeCourseCode($code)) ?>">
                     <strong style="<?= ($prereqFailed && !$isRegular) ? 'color: #c93838ff !important;' : '' ?>">
-                        <?php 
-                        // Show empty cell for PREREQ display
-                        $showPrereq = ($prereqFailed && !$isRegular) && 
-                                    !empty($prereq) && 
-                                    !in_array(strtolower(trim($prereq)), ['none', 'n/a', '-', '', 'none ']);
-                        echo $showPrereq ? '' : ($displayGrade ?? '—'); 
-                        ?>
+                        <?= $displayGrade ?? '—'; ?>
                     </strong>
                   </td>
                   <td class="text-center" style="padding: 12px 8px;">
