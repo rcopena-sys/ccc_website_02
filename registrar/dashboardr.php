@@ -80,6 +80,77 @@ if (
     exit;
 }
 
+// --- Semestral lock handler (AJAX from modal) ---
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['action']) && $_POST['action'] === 'toggle_sem_lock'
+) {
+    header('Content-Type: application/json');
+
+    $semesterRaw = $_POST['semester'] ?? '';
+    $semester    = (int)$semesterRaw;
+    $isLocked    = isset($_POST['is_locked']) ? (int)$_POST['is_locked'] : 1;
+
+    if (!in_array($semester, [1, 2], true)) {
+        echo json_encode(['success' => false, 'message' => 'Invalid semester selected.']);
+        exit;
+    }
+
+    $semesterLabel = $semester === 1 ? 'First Semester' : 'Second Semester';
+
+    // Ensure table exists
+    $createLockSql = "CREATE TABLE IF NOT EXISTS semester_locks (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        semester TINYINT NOT NULL,
+        is_locked TINYINT(1) NOT NULL DEFAULT 0,
+        locked_by INT NULL,
+        locked_at TIMESTAMP NULL DEFAULT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_semester (semester)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+
+    if (!$conn->query($createLockSql)) {
+        echo json_encode(['success' => false, 'message' => 'DB error creating lock table: ' . $conn->error]);
+        exit;
+    }
+
+    $lockedBy = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
+
+    $sql = "INSERT INTO semester_locks (semester, is_locked, locked_by, locked_at)
+            VALUES (?, ?, ?, IF(? = 1, NOW(), NULL))
+            ON DUPLICATE KEY UPDATE
+              is_locked = VALUES(is_locked),
+              locked_by = VALUES(locked_by),
+              locked_at = IF(VALUES(is_locked) = 1, NOW(), NULL)";
+
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        echo json_encode(['success' => false, 'message' => 'DB error: ' . $conn->error]);
+        exit;
+    }
+
+    $stmt->bind_param('iiii', $semester, $isLocked, $lockedBy, $isLocked);
+    $ok = $stmt->execute();
+    $stmt->close();
+
+    if (!$ok) {
+        echo json_encode(['success' => false, 'message' => 'Failed to update semestral lock.']);
+        exit;
+    }
+
+    $msg = $isLocked === 1
+        ? $semesterLabel . ' locked successfully.'
+        : $semesterLabel . ' unlocked successfully.';
+
+    echo json_encode([
+        'success'  => true,
+        'message'  => $msg,
+        'semester' => $semester,
+        'is_locked'=> $isLocked,
+    ]);
+    exit;
+}
+
 // Load current enrollment period for stueval.php (if any) to prefill the modal
 $currentEnrollment = null;
 try {
@@ -100,6 +171,30 @@ try {
     }
 } catch (Exception $e) {
     // Fail silently for dashboard if table is missing
+}
+
+// Load current semestral lock states (1st and 2nd semester)
+$semesterLocks = [
+    1 => ['is_locked' => 0],
+    2 => ['is_locked' => 0],
+];
+
+try {
+    $checkLockTable = "SHOW TABLES LIKE 'semester_locks'";
+    $resLock = $conn->query($checkLockTable);
+    if ($resLock && $resLock->num_rows > 0) {
+        $lockRes = $conn->query("SELECT semester, is_locked FROM semester_locks");
+        if ($lockRes) {
+            while ($row = $lockRes->fetch_assoc()) {
+                $sem = (int)$row['semester'];
+                if ($sem === 1 || $sem === 2) {
+                    $semesterLocks[$sem]['is_locked'] = (int)$row['is_locked'];
+                }
+            }
+        }
+    }
+} catch (Exception $e) {
+    // Ignore lock loading issues on dashboard
 }
 
 // Initialize user data
@@ -294,6 +389,7 @@ $irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['co
             <a href="student_evaluation.php" class="nav-link"><i class="fas fa-clipboard-check"></i> Student Evaluation</a>
             <a href="studentgrade.php" class="nav-link">Student Grade</a>
             <a href="#" id="enrollmentPeriodLink" class="nav-link"><i class="fas fa-calendar"></i> Enrollment Period</a>
+            <a href="#" id="semLockLink" class="nav-link"><i class="fas fa-lock"></i> Semestral Lock</a>
             <a href="feedbackr.php" class="nav-link">Feedback</a>
             <a href="profile.php" class="nav-link"><i class="fas fa-user"></i> Profile</a>
             <a href="../logout.php" class="nav-link"><i class="fas fa-sign-out-alt"></i> Logout</a>
@@ -373,6 +469,60 @@ $irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['co
                     <div style="margin-top:18px; display:flex; justify-content:flex-end; gap:8px;">
                         <button type="button" id="enrollCancelBtn" style="padding:8px 14px; border-radius:6px; border:1px solid #d1d5db; background:white; color:#374151; cursor:pointer;">Cancel</button>
                         <button type="button" id="enrollSaveBtn" style="padding:8px 16px; border-radius:6px; border:none; background:#2563eb; color:white; font-weight:600; cursor:pointer;">Save</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Semestral Lock Modal -->
+            <div id="semLockModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:1001; align-items:center; justify-content:center;">
+                <div style="background:white; padding:20px 24px; border-radius:12px; width:100%; max-width:480px; box-shadow:0 10px 25px rgba(15,23,42,0.25);">
+                    <h3 style="margin-top:0; margin-bottom:12px; color:#111827;">Semestral Lock</h3>
+                    <p style="margin:0 0 16px; font-size:0.9rem; color:#4b5563;">
+                        Lock or unlock actions for each semester. When a semester is locked, related operations in the system can be restricted.
+                    </p>
+
+                    <div style="display:flex; flex-direction:column; gap:12px;">
+                        <!-- First Semester -->
+                        <div style="border:1px solid #e5e7eb; border-radius:8px; padding:10px 12px; display:flex; align-items:center; justify-content:space-between;">
+                            <div>
+                                <div style="font-weight:600; color:#111827;">First Semester</div>
+                                <div id="sem1Status" style="font-size:0.85rem; color:#6b7280;">
+                                    Status: <?php echo $semesterLocks[1]['is_locked'] ? 'Locked' : 'Unlocked'; ?>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                class="sem-lock-btn"
+                                data-sem="1"
+                                data-locked="<?php echo $semesterLocks[1]['is_locked'] ? '1' : '0'; ?>"
+                                style="padding:8px 14px; border-radius:6px; border:none; cursor:pointer; font-weight:600; color:white; background:<?php echo $semesterLocks[1]['is_locked'] ? '#6b7280' : '#2563eb'; ?>;">
+                                <?php echo $semesterLocks[1]['is_locked'] ? 'Unlock' : 'Lock'; ?>
+                            </button>
+                        </div>
+
+                        <!-- Second Semester -->
+                        <div style="border:1px solid #e5e7eb; border-radius:8px; padding:10px 12px; display:flex; align-items:center; justify-content:space-between;">
+                            <div>
+                                <div style="font-weight:600; color:#111827;">Second Semester</div>
+                                <div id="sem2Status" style="font-size:0.85rem; color:#6b7280;">
+                                    Status: <?php echo $semesterLocks[2]['is_locked'] ? 'Locked' : 'Unlocked'; ?>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                class="sem-lock-btn"
+                                data-sem="2"
+                                data-locked="<?php echo $semesterLocks[2]['is_locked'] ? '1' : '0'; ?>"
+                                style="padding:8px 14px; border-radius:6px; border:none; cursor:pointer; font-weight:600; color:white; background:<?php echo $semesterLocks[2]['is_locked'] ? '#6b7280' : '#2563eb'; ?>;">
+                                <?php echo $semesterLocks[2]['is_locked'] ? 'Unlock' : 'Lock'; ?>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="semLockMessage" style="margin-top:10px; font-size:0.85rem; color:#b91c1c; display:none;"></div>
+
+                    <div style="margin-top:18px; display:flex; justify-content:flex-end; gap:8px;">
+                        <button type="button" id="semLockCloseBtn" style="padding:8px 14px; border-radius:6px; border:1px solid #d1d5db; background:white; color:#374151; cursor:pointer;">Close</button>
                     </div>
                 </div>
             </div>
@@ -544,6 +694,130 @@ $irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['co
                 });
             });
         }
+
+        // Semestral Lock modal logic
+        const semLockLink = document.getElementById('semLockLink');
+        const semLockModal = document.getElementById('semLockModal');
+        const semLockCloseBtn = document.getElementById('semLockCloseBtn');
+        const semLockMessage = document.getElementById('semLockMessage');
+
+        function openSemLockModal() {
+            if (semLockModal) {
+                semLockModal.style.display = 'flex';
+                if (semLockMessage) {
+                    semLockMessage.style.display = 'none';
+                    semLockMessage.textContent = '';
+                }
+            }
+        }
+
+        function closeSemLockModal() {
+            if (semLockModal) {
+                semLockModal.style.display = 'none';
+            }
+        }
+
+        if (semLockLink) {
+            semLockLink.addEventListener('click', function (e) {
+                e.preventDefault();
+                openSemLockModal();
+            });
+        }
+
+        if (semLockCloseBtn) {
+            semLockCloseBtn.addEventListener('click', function () {
+                closeSemLockModal();
+            });
+        }
+
+        if (semLockModal) {
+            semLockModal.addEventListener('click', function (e) {
+                if (e.target === semLockModal) {
+                    closeSemLockModal();
+                }
+            });
+        }
+
+        function updateSemLockUI(sem, isLocked) {
+            const statusEl = document.getElementById(sem === 1 ? 'sem1Status' : 'sem2Status');
+            const btn = document.querySelector('.sem-lock-btn[data-sem="' + sem + '"]');
+            if (!btn || !statusEl) return;
+
+            btn.dataset.locked = isLocked ? '1' : '0';
+            btn.textContent = isLocked ? 'Unlock' : 'Lock';
+            btn.style.background = isLocked ? '#6b7280' : '#2563eb';
+            statusEl.textContent = 'Status: ' + (isLocked ? 'Locked' : 'Unlocked');
+        }
+
+        const semLockButtons = document.querySelectorAll('.sem-lock-btn');
+        semLockButtons.forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                const sem = parseInt(btn.dataset.sem, 10);
+                const currentlyLocked = btn.dataset.locked === '1';
+                const newStatus = currentlyLocked ? 0 : 1;
+
+                const formData = new URLSearchParams();
+                formData.append('action', 'toggle_sem_lock');
+                formData.append('semester', String(sem));
+                formData.append('is_locked', String(newStatus));
+
+                if (semLockMessage) {
+                    semLockMessage.style.display = 'none';
+                    semLockMessage.textContent = '';
+                    semLockMessage.style.color = '#b91c1c';
+                }
+
+                fetch('dashboardr.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: formData.toString()
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) {
+                        if (semLockMessage) {
+                            semLockMessage.textContent = data.message || 'Failed to update semestral lock.';
+                            semLockMessage.style.display = 'block';
+                        }
+                        if (window.Swal) {
+                            Swal.fire({
+                                icon: 'error',
+                                title: 'Update failed',
+                                text: data.message || 'Failed to update semestral lock.',
+                                confirmButtonText: 'OK'
+                            });
+                        }
+                    } else {
+                        const isLocked = data.is_locked === 1 || data.is_locked === '1';
+                        updateSemLockUI(sem, isLocked);
+
+                        if (window.Swal) {
+                            Swal.fire({
+                                icon: 'success',
+                                title: 'Semestral lock updated',
+                                text: data.message || 'Semestral lock updated successfully.',
+                                confirmButtonText: 'OK'
+                            });
+                        }
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    if (semLockMessage) {
+                        semLockMessage.textContent = 'Error updating semestral lock.';
+                        semLockMessage.style.display = 'block';
+                    }
+                    if (window.Swal) {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Error',
+                            text: 'Error updating semestral lock.',
+                            confirmButtonText: 'OK'
+                        });
+                    }
+                });
+            });
+        });
     </script>
 </body>
 </html>

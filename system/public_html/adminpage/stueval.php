@@ -772,6 +772,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['CONTENT_TYPE']) && 
 
 $studentId = trim($_GET['student_id'] ?? $_POST['student_id'] ?? '');
 $program = trim($_GET['program'] ?? $_POST['program'] ?? '');
+// Preserve any program chosen in the form (e.g. cross-program evaluation)
+$formProgram = strtoupper(trim($program));
 $fiscalYear = trim($_GET['fiscal_year'] ?? $_POST['fiscal_year'] ?? '');
 
 $student = null;
@@ -827,16 +829,27 @@ if ($studentId !== '') {
 // Debug: Log student data for troubleshooting
 error_log("Student data: " . print_r($student, true));
 
-// Normalize program name
-$program = '';
+// Determine student classification (if available)
+$studentClassification = strtolower(trim($student['classification'] ?? ''));
 
-// Try to get program from different possible field names
-$possibleProgramFields = ['programs', 'program', 'course', 'program_name'];
-foreach ($possibleProgramFields as $field) {
+// Normalize program name
+// If the student is irregular and a valid program was selected in the form,
+// prefer that selection for the curriculum program.
+$program = '';
+if (strpos($studentClassification, 'irregular') !== false && in_array($formProgram, ['BSIT', 'BSCS'], true)) {
+  $program = $formProgram;
+}
+
+// If we still don't have a program, try to get it from different possible
+// field names on the student record.
+if ($program === '') {
+  $possibleProgramFields = ['programs', 'program', 'course', 'program_name'];
+  foreach ($possibleProgramFields as $field) {
     if (!empty($student[$field])) {
-        $program = trim($student[$field]);
-        break;
+      $program = trim($student[$field]);
+      break;
     }
+  }
 }
 
 // If still no program, check assign_curriculum table
@@ -1139,36 +1152,38 @@ $ysOrder = ['1-1','1-2','2-1','2-2','3-1','3-2','4-1','4-2'];
 
 // Define unit limits for each semester and course
 $unitLimits = [
-    'BSIT' => [
-        '1-1' => ['max' => 26, 'label' => 'FIRST YEAR • FIRST SEMESTER'],
-        '1-2' => ['max' => 26, 'label' => 'FIRST YEAR • SECOND SEMESTER'],
-        '2-1' => ['max' => 26, 'label' => 'SECOND YEAR • FIRST SEMESTER'],
-        '2-2' => ['max' => 23, 'label' => 'SECOND YEAR • SECOND SEMESTER'],
-        '3-1' => ['max' => 24, 'label' => 'THIRD YEAR • FIRST SEMESTER'],
-        '3-2' => ['max' => 12, 'label' => 'THIRD YEAR • SECOND SEMESTER'],
-        '4-1' => ['max' => 6,  'label' => 'FOURTH YEAR • FIRST SEMESTER'],
-        '4-2' => ['max' => 6,  'label' => 'FOURTH YEAR • SECOND SEMESTER']
-    ],
-    'BSCS' => [
-        '1-1' => ['max' => 26, 'label' => 'FIRST YEAR • FIRST SEMESTER'],
-        '1-2' => ['max' => 26, 'label' => 'FIRST YEAR • SECOND SEMESTER'],
-        '2-1' => ['max' => 26, 'label' => 'SECOND YEAR • FIRST SEMESTER'],
-        '2-2' => ['max' => 26, 'label' => 'SECOND YEAR • SECOND SEMESTER'],
-        '3-1' => ['max' => 24, 'label' => 'THIRD YEAR • FIRST SEMESTER'],
-        '3-2' => ['max' => 13, 'label' => 'THIRD YEAR • SECOND SEMESTER'],
-        '4-1' => ['max' => 6,  'label' => 'FOURTH YEAR • FIRST SEMESTER'],
-        '4-2' => ['max' => 6,  'label' => 'FOURTH YEAR • SECOND SEMESTER']
-    ]
+  'BSIT' => [
+    '1-1' => ['max' => 26, 'label' => 'FIRST YEAR • FIRST SEMESTER'],
+    '1-2' => ['max' => 26, 'label' => 'FIRST YEAR • SECOND SEMESTER'],
+    '2-1' => ['max' => 26, 'label' => 'SECOND YEAR • FIRST SEMESTER'],
+    '2-2' => ['max' => 23, 'label' => 'SECOND YEAR • SECOND SEMESTER'],
+    '3-1' => ['max' => 24, 'label' => 'THIRD YEAR • FIRST SEMESTER'],
+    '3-2' => ['max' => 12, 'label' => 'THIRD YEAR • SECOND SEMESTER'],
+    '4-1' => ['max' => 6,  'label' => 'FOURTH YEAR • FIRST SEMESTER'],
+    '4-2' => ['max' => 6,  'label' => 'FOURTH YEAR • SECOND SEMESTER']
+  ],
+  'BSCS' => [
+    '1-1' => ['max' => 26, 'label' => 'FIRST YEAR • FIRST SEMESTER'],
+    '1-2' => ['max' => 26, 'label' => 'FIRST YEAR • SECOND SEMESTER'],
+    '2-1' => ['max' => 26, 'label' => 'SECOND YEAR • FIRST SEMESTER'],
+    '2-2' => ['max' => 26, 'label' => 'SECOND YEAR • SECOND SEMESTER'],
+    '3-1' => ['max' => 24, 'label' => 'THIRD YEAR • FIRST SEMESTER'],
+    '3-2' => ['max' => 13, 'label' => 'THIRD YEAR • SECOND SEMESTER'],
+    '4-1' => ['max' => 6,  'label' => 'FOURTH YEAR • FIRST SEMESTER'],
+    '4-2' => ['max' => 6,  'label' => 'FOURTH YEAR • SECOND SEMESTER']
+  ]
 ];
 
-    // Special rule: if the current student is IRREGULAR,
-    // cap the 4-2 irregular-load limit at 9 units.
-    $studentClassification = strtolower(trim($student['classification'] ?? ''));
-    if (strpos($studentClassification, 'irregular') !== false) {
-      if (isset($unitLimits[$program]['4-2'])) {
-        $unitLimits[$program]['4-2']['max'] = 9.0;
-      }
+// Special rule: if the current student is IRREGULAR,
+// allow an additional 6 units in 4-1 and 4-2.
+$studentClassification = strtolower(trim($student['classification'] ?? ''));
+if (strpos($studentClassification, 'irregular') !== false && isset($unitLimits[$program])) {
+  foreach (['4-1', '4-2'] as $ys) {
+    if (isset($unitLimits[$program][$ys])) {
+      $unitLimits[$program][$ys]['max'] += 6.0;
     }
+  }
+}
 
 // Use the unit limits for labels if available, otherwise fallback to default
 $labels = [];
@@ -2899,15 +2914,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
                 
-                // Check unit limits
+                // Check unit limits (already adjusted server-side for irregular students)
                 let maxUnits = unitLimits[program] && unitLimits[program][yearSem] ? unitLimits[program][yearSem].max : 26;
-
-                // Special rule: if student is irregular and semester is 4-2,
-                // cap the irregular load at 9 units.
-                const cls = (window.studentClassification || '').toLowerCase();
-                if (yearSem === '4-2' && cls.includes('irregular')) {
-                  maxUnits = Math.min(maxUnits, 9.0);
-                }
 
                 const totalUnitsAfter = currentUnits + newUnits;
                 

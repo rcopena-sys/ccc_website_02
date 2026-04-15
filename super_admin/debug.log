@@ -62,3 +62,4 @@ Stack trace:
 [23-Feb-2026 05:44:45 UTC] PHP Warning:  Uninitialized string offset 71 in /home/u220649928/domains/ccc-curi-eval.com/public_html/super_admin/create_student_account_handler.php on line 47
 [17-Mar-2026 16:37:46 Europe/Berlin] PHP Warning:  Uninitialized string offset 70 in C:\xampp\htdocs\website\super_admin\create_student_account_handler.php on line 34
 [14-Apr-2026 04:42:05 Europe/Berlin] PHP Warning:  Uninitialized string offset 71 in C:\xampp\htdocs\website\super_admin\create_student_account_handler.php on line 37
+[15-Apr-2026 09:55:52 Europe/Berlin] PHP Warning:  Uninitialized string offset 70 in C:\xampp\htdocs\website\super_admin\create_student_account_handler.php on line 34
