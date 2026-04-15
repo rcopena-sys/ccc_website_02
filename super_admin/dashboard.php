@@ -38,12 +38,12 @@ foreach ($roles as $role) {
     $stmt->close();
 }
 
-// Get curriculum statistics from curriculum table for BSIT and BSCS programs by fiscal year
+// Get curriculum statistics and total number of curriculum programs (like curriculum.php)
+// Per-fiscal-year stats (not currently shown but kept for possible future use)
 $curriculum_stats = [];
-$sql = "SELECT fiscal_year, COUNT(DISTINCT program) as count 
+$sql = "SELECT fiscal_year, COUNT(*) as count 
         FROM curriculum 
-        WHERE program IN ('BSIT', 'BSCS') 
-        AND fiscal_year IS NOT NULL AND fiscal_year != '' 
+        WHERE fiscal_year IS NOT NULL AND fiscal_year != '' 
         GROUP BY fiscal_year 
         ORDER BY fiscal_year";
 $result = $conn->query($sql);
@@ -51,64 +51,23 @@ if ($result && $result->num_rows > 0) {
     while ($row = $result->fetch_assoc()) {
         $curriculum_stats[] = $row;
     }
-} else {
-    // Try to get total count for BSIT and BSCS without fiscal year grouping
-    $sql_total = "SELECT COUNT(DISTINCT program) as count 
-                  FROM curriculum 
-                  WHERE program IN ('BSIT', 'BSCS')";
-    $result_total = $conn->query($sql_total);
-    if ($result_total) {
-        $total_row = $result_total->fetch_assoc();
-        $curriculum_stats = [
-            ['fiscal_year' => 'All Years', 'count' => $total_row['count']]
-        ];
-    } else {
-        // Fallback to zero if both queries fail
-        $curriculum_stats = [
-            ['fiscal_year' => 'No Data', 'count' => 0]
-        ];
-    }
 }
 
-// Debug: Output curriculum stats for debugging
-error_log('Curriculum stats: ' . print_r($curriculum_stats, true));
+// Total distinct curriculum programs (same logic as Programs card in curriculum.php)
+$total_curriculum_programs = 0;
+$sql_programs = "SELECT COUNT(DISTINCT program) as program_count 
+                 FROM curriculum 
+                 WHERE program IS NOT NULL AND program != ''";
+$result_programs = $conn->query($sql_programs);
+if ($result_programs) {
+    $row_programs = $result_programs->fetch_assoc();
+    $total_curriculum_programs = (int)($row_programs['program_count'] ?? 0);
+}
 
-// Get total students using the same method as list.php
-$signinWhere = ["(r.role_name IN ('BSIT', 'BSCS'))"];
-$sql = "(SELECT 
-            s.student_id as id,
-            s.firstname,
-            s.lastname,
-            s.email,
-            s.student_id,
-            s.course,
-            s.classification,
-            r.role_name,
-            'N/A' as curriculum,
-         
-            '' as fiscal_year,
-            'signin_db' as source_table
-        FROM signin_db s 
-        LEFT JOIN roles r ON s.role_id = r.role_id 
-        WHERE " . implode(' AND ', $signinWhere) . ")
-        UNION
-        (SELECT 
-            st.student_id as id,
-            st.student_name as firstname,
-            '' as lastname,
-            '' as email,
-            st.student_id,
-            st.programs as course,
-            st.classification,
-            'Student' as role_name,
-            st.curriculum,
-        
-            st.fiscal_year,
-            'students_db' as source_table
-        FROM students_db st)";
-        
+// Get total students from students_db only
+$sql = "SELECT COUNT(*) as count FROM students_db";
 $result = $conn->query($sql);
-$total_students = $result ? $result->num_rows : 0;
+$total_students = $result ? (int)$result->fetch_assoc()['count'] : 0;
 
 // Get recent activity
 $recent_activity = [];
@@ -760,8 +719,8 @@ $conn->close();
                 <div class="stat-icon curriculum">
                     <i class="fas fa-book"></i>
                 </div>
-                <div class="stat-value"><?php echo number_format(array_sum(array_column($curriculum_stats, 'count'))); ?></div>
-                <div class="stat-label">Total Curriculum</div>
+                <div class="stat-value"><?php echo number_format($total_curriculum_programs); ?></div>
+                <div class="stat-label">curriculum</div>
             </a>
             
             <a href="student_acc.php" class="stat-card">
@@ -826,7 +785,7 @@ $conn->close();
         <div class="activity-feed">
             <div class="chart-header">
                 <div>
-                    <h3 class="chart-title">Recent Activity</h3>
+                    <h3 class="chart-title">User Logs</h3>
                     <p class="chart-subtitle">Latest system activities</p>
                 </div>
             </div>

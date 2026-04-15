@@ -1027,13 +1027,6 @@ $json_table = json_encode($table_array);
                             <h4 class="mb-0">User Management</h4>
                             <p class="text-muted mb-0">Manage all system users and their permissions</p>
                         </div>
-                        <div class="d-flex">
-                            <div class="search-box">
-                                <i class="fas fa-search"></i>
-                                <input type="text" id="search-input" class="form-control" placeholder="Search users...">
-                            </div>
-            
-                        </div>
                     </div>
                     
                     <div class="card mt-4">
@@ -1606,30 +1599,7 @@ echo "<tr class='user-row' data-id='" . $userId . "'>
             }
         });
         
-        // Search functionality
-        document.getElementById('search-input')?.addEventListener('input', function(e) {
-            clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(() => {
-                const value = e.target.value.toLowerCase();
-                if (value === '') {
-                    table.clearFilter();
-                    return;
-                }
-                
-                table.setFilter(function(data) {
-                    // Check all relevant fields for matches
-                    return (
-                        String(data.firstname || '').toLowerCase().includes(value) ||
-                        String(data.lastname || '').toLowerCase().includes(value) ||
-                        String(data.email || '').toLowerCase().includes(value) ||
-                        String(data.student_id || '').toLowerCase().includes(value) ||
-                        String(data.section || '').toLowerCase().includes(value) ||
-                        String(data.year_level || '').toLowerCase().includes(value)
-                    );
-                });
-                updateEntryCounts();
-            }, 300);
-        });
+        // Search removed: no search input or filtering on this page
 
         // Add download button handlers
         const downloadCsv = document.getElementById('download-csv');

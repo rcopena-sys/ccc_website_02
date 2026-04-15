@@ -36,11 +36,9 @@ try {
     $stmt->bind_param('si', $status, $user_id);
 
     if ($stmt->execute()) {
-        if ($stmt->affected_rows > 0) {
-            echo json_encode(['success' => true, 'status' => $status]);
-        } else {
-            echo json_encode(['success' => false, 'message' => 'User not found or status unchanged']);
-        }
+        // Treat a successful execute as success even if affected_rows is 0,
+        // to avoid false errors when the status is already set to the same value.
+        echo json_encode(['success' => true, 'status' => $status]);
     } else {
         throw new Exception('Failed to execute query');
     }

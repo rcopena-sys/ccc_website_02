@@ -1,6 +1,15 @@
 <?php
 session_start();
 require_once __DIR__ . '/../db_connect.php';
+
+// Keep students_db.classification in sync with signin_db.classification
+// for all students sharing the same student_id.
+$syncClassificationSql = "UPDATE students_db s
+    INNER JOIN signin_db si ON s.student_id = si.student_id
+    SET s.classification = si.classification
+    WHERE si.classification IS NOT NULL
+      AND (s.classification IS NULL OR s.classification <> si.classification)";
+$conn->query($syncClassificationSql);
 // Check if a student is regular based on classification
 function isRegularStudent($studentData) {
     if (!isset($studentData['classification'])) {
@@ -443,152 +452,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['grade'])) {
 
 // AJAX: return irregular subjects for a student and semester
 if (isset($_GET['action']) && $_GET['action'] === 'get_irregular') {
-    header('Content-Type: application/json');
-    $student_id = trim($_GET['student_id'] ?? '');
-    $ys = trim($_GET['ys'] ?? ''); // format expected: '1-1'
+  header('Content-Type: application/json');
+  $student_id = trim($_GET['student_id'] ?? '');
+  $ys = trim($_GET['ys'] ?? ''); // format expected: '1-1'
 
-    // Debug logging
-    error_log("=== DEBUG: get_irregular called ===");
-    error_log("Student ID: $student_id");
-    error_log("Year-Semester: $ys");
-
-    if ($student_id === '' || $ys === '') {
-        $error = 'Missing parameters: ' . ($student_id === '' ? 'student_id, ' : '') . ($ys === '' ? 'ys' : '');
-        error_log("ERROR: $error");
-        echo json_encode(['success' => false, 'data' => [], 'message' => $error]);
-        exit;
-    }
-
-    // Parse year and semester
-    $parts = explode('-', $ys);
-    if (count($parts) !== 2) {
-        $error = "Invalid year-semester format: $ys (expected format: 'Y-S' where Y is year and S is semester)";
-        error_log("ERROR: $error");
-        echo json_encode(['success' => false, 'data' => [], 'message' => $error]);
-        exit;
-    }
-    
-    $y = intval($parts[0]);
-    $s = intval($parts[1]);
-    
-    // Debug logging
-    error_log("Parsed - Year: $y, Semester: $s");
-
-    // First, try to get the data using the standard column names
-    $sql = "SELECT 
-                id, 
-                course_code, 
-                course_title, 
-                lec_units, 
-                lab_units, 
-                total_units,
-                prerequisites,
-                status,
-                program
-            FROM irregular_db 
-            WHERE student_id = ? 
-            AND year_level = ? 
-            AND semester = ?";
-    
-    // Debug logging
-    error_log("Generated SQL: $sql");
-    error_log("With parameters: student_id=$student_id, year_level=$y, semester=$s");
-
-    $stmt = $conn->prepare($sql);
-    if (!$stmt) {
-        $error = 'Failed to prepare statement: ' . $conn->error;
-        error_log("ERROR: $error");
-        
-        // If the first query fails, try with alternative column names
-        $sql = "SELECT 
-                    id, 
-                    course_code, 
-                    course_title, 
-                    lec_units, 
-                    lab_units, 
-                    total_units,
-                    prerequisites,
-                    status,
-                    program
-                FROM irregular_db 
-                WHERE student_id = ? 
-                AND year = ? 
-                AND sem = ?";
-        
-        error_log("Trying alternative query with year/sem columns");
-        $stmt = $conn->prepare($sql);
-        
-        if (!$stmt) {
-            $error = 'Failed to prepare alternative statement: ' . $conn->error;
-            error_log("ERROR: $error");
-            echo json_encode(['success' => false, 'data' => [], 'message' => 'Database error']);
-            exit;
-        }
-    }
-    
-    $stmt->bind_param('sii', $student_id, $y, $s);
-    $executed = $stmt->execute();
-    
-    if ($executed === false) {
-        $error = 'Failed to execute query: ' . $stmt->error;
-        error_log("ERROR: $error");
-        echo json_encode(['success' => false, 'data' => [], 'message' => 'Failed to fetch data']);
-        exit;
-    }
-    
-    $res = $stmt->get_result();
-    if ($res === false) {
-        $error = 'Failed to get result set: ' . $stmt->error;
-        error_log("ERROR: $error");
-        echo json_encode(['success' => false, 'data' => [], 'message' => 'Failed to process results']);
-        exit;
-    }
-    
-    $rows = [];
-    while ($r = $res->fetch_assoc()) {
-        $rows[] = $r;
-    }
-    
-    // Debug logging
-    $rowCount = count($rows);
-    error_log("Query returned $rowCount rows");
-    if ($rowCount > 0) {
-        error_log("First row data: " . json_encode($rows[0]));
-    } else {
-        error_log("No rows found for student $student_id, year $y, semester $s");
-        
-        // Try one more time with a more permissive query in case of data issues
-        $sql = "SELECT 
-                    id, 
-                    course_code, 
-                    course_title, 
-                    lec_units, 
-                    lab_units, 
-                    total_units,
-                    prerequisites,
-                    status,
-                    program
-                FROM irregular_db 
-                WHERE student_id = ? 
-                AND (year_level = ? OR year = ?)
-                AND (semester = ? OR sem = ?)";
-        
-        $stmt = $conn->prepare($sql);
-        if ($stmt) {
-            $stmt->bind_param('siiii', $student_id, $y, $y, $s, $s);
-            if ($stmt->execute()) {
-                $res = $stmt->get_result();
-                while ($r = $res->fetch_assoc()) {
-                    $rows[] = $r;
-                }
-                $rowCount = count($rows);
-                error_log("Alternative query returned $rowCount rows");
-            }
-        }
-    }
-    
-    echo json_encode(['success' => true, 'data' => $rows]);
+  // Basic parameter validation
+  if ($student_id === '' || $ys === '') {
+    echo json_encode(['success' => false, 'data' => [], 'message' => 'Missing parameters']);
     exit;
+  }
+
+  [$y, $s] = array_map('intval', explode('-', $ys));
+
+  // Determine actual column names in irregular_db (handles year_level/year and semester/sem)
+  $colsRes = $conn->query('SHOW COLUMNS FROM irregular_db');
+  $columns = [];
+  while ($c = $colsRes->fetch_assoc()) {
+    $columns[] = $c['Field'];
+  }
+
+  $yearCol   = in_array('year_level', $columns, true) ? 'year_level' : (in_array('year', $columns, true) ? 'year' : 'year_level');
+  $semCol    = in_array('semester', $columns, true)   ? 'semester'   : (in_array('sem', $columns, true)   ? 'sem'   : 'semester');
+  $lecCol    = in_array('lec_units', $columns, true)  ? 'lec_units'  : (in_array('lecture_units', $columns, true) ? 'lecture_units' : null);
+  $labCol    = in_array('lab_units', $columns, true)  ? 'lab_units'  : null;
+  $totalCol  = in_array('total_units', $columns, true) ? 'total_units' : (in_array('units', $columns, true) ? 'units' : null);
+  $statusCol = in_array('status', $columns, true)     ? 'status'     : null;
+
+  // Build a safe SELECT list using only existing columns
+  $selectCols = ['id', 'course_code', 'course_title'];
+  $selectCols[] = $lecCol   ? "$lecCol AS lec_units"   : '0 AS lec_units';
+  $selectCols[] = $labCol   ? "$labCol AS lab_units"   : '0 AS lab_units';
+  $selectCols[] = $totalCol ? "$totalCol AS total_units" : '0 AS total_units';
+  if ($statusCol) {
+    $selectCols[] = "$statusCol AS status";
+  }
+
+  $sql = 'SELECT ' . implode(',', $selectCols) . " FROM irregular_db WHERE student_id = ? AND $yearCol = ? AND $semCol = ?";
+  $stmt = $conn->prepare($sql);
+  if (!$stmt) {
+    echo json_encode(['success' => false, 'data' => [], 'message' => 'DB error: ' . $conn->error]);
+    exit;
+  }
+
+  $stmt->bind_param('sii', $student_id, $y, $s);
+  $stmt->execute();
+  $res = $stmt->get_result();
+  $rows = [];
+  while ($r = $res->fetch_assoc()) {
+    $rows[] = $r;
+  }
+
+  echo json_encode(['success' => true, 'data' => $rows]);
+  exit;
 }
 
 // Handle delete irregular subject
@@ -1470,14 +1385,59 @@ foreach ($ysOrder as $ys) {
 // Build a unit limit configuration per program and semester
 // Used by the frontend to prevent exceeding the curriculum load.
 $unitLimits = [
-    'BSIT' => [],
-    'BSCS' => [],
+  'BSIT' => [],
+  'BSCS' => [],
 ];
 
 foreach ($ysOrder as $ys) {
-    $limit = $maxUnitsPerSemester[$ys] ?? 26; // Fallback to 26 if not found
-    $unitLimits['BSIT'][$ys] = ['max' => $limit];
-    $unitLimits['BSCS'][$ys] = ['max' => $limit];
+  $limit = $maxUnitsPerSemester[$ys] ?? 26; // Fallback to 26 if not found
+  $unitLimits['BSIT'][$ys] = ['max' => $limit];
+  $unitLimits['BSCS'][$ys] = ['max' => $limit];
+}
+
+// Special rule: for IRREGULAR students in 4-2, limit
+// the total irregular-load units to a maximum of 9 units.
+$studentClassification = strtolower(trim($student['classification'] ?? ''));
+if (strpos($studentClassification, 'irregular') !== false) {
+  if (!empty($program) && isset($unitLimits[$program]['4-2'])) {
+    // Irregular students are allowed up to 9 units in 4-2,
+    // even if the regular curriculum load is lower.
+    $unitLimits[$program]['4-2']['max'] = max($unitLimits[$program]['4-2']['max'], 9.0);
+  }
+}
+
+// Enrollment period / evaluation window for this page
+$evaluationOpen = true;
+$enrollmentPeriodMessage = '';
+
+try {
+  $tblRes = $conn->query("SHOW TABLES LIKE 'enrollment_periods'");
+  if ($tblRes && $tblRes->num_rows > 0) {
+    $pageKey = 'stueval';
+    $stmt = $conn->prepare("SELECT start_datetime, end_datetime FROM enrollment_periods WHERE page = ? LIMIT 1");
+    if ($stmt) {
+      $stmt->bind_param('s', $pageKey);
+      if ($stmt->execute()) {
+        $res = $stmt->get_result();
+        if ($row = $res->fetch_assoc()) {
+          $tz = new DateTimeZone('Asia/Manila');
+          $now   = new DateTime('now', $tz);
+          $start = new DateTime($row['start_datetime'], $tz);
+          $end   = new DateTime($row['end_datetime'], $tz);
+
+          if ($now < $start || $now > $end) {
+            $evaluationOpen = false;
+            $fmt = 'M d, Y h:i A';
+            $enrollmentPeriodMessage = 'Evaluation is allowed only from ' . $start->format($fmt) . ' to ' . $end->format($fmt) . '.';
+          }
+        }
+      }
+      $stmt->close();
+    }
+  }
+} catch (Throwable $e) {
+  // Fail open on errors but log for diagnostics
+  error_log('Enrollment period check failed in stueval.php: ' . $e->getMessage());
 }
 
 ?>
@@ -1496,6 +1456,11 @@ foreach ($ysOrder as $ys) {
     window.passedSubjects = <?php echo json_encode(array_keys($passedSubjects ?? [])); ?>;
     // Flag: does the student have any subjects in 1st Year • 1st Semester?
     window.hasFirstYearFirstSem = <?php echo $hasFirstYearFirstSemGrade ? 'true' : 'false'; ?>;
+    // Expose student classification for client-side rules (e.g., irregular caps)
+    window.studentClassification = <?php echo json_encode($student['classification'] ?? ''); ?>;
+    // Enrollment / evaluation period flags
+    window.evaluationOpen = <?php echo $evaluationOpen ? 'true' : 'false'; ?>;
+    window.enrollmentPeriodMessage = <?php echo json_encode($enrollmentPeriodMessage); ?>;
   </script>
 
   <style>
@@ -1855,9 +1820,9 @@ foreach ($ysOrder as $ys) {
       </div>
       <?php if (columnExists($conn, 'curriculum', 'fiscal_year')): ?>
       <div class="col-sm-3">
-        <label class="form-label">Fiscal Year</label>
+        <label class="form-label">Curriculum</label>
         <select name="fiscal_year" class="form-select">
-          <option value="">Select Fiscal Year...</option>
+          <option value="">Select Curriculum...</option>
           <?php foreach ($availableFiscalYears as $fyLabel): ?>
             <option value="<?= htmlspecialchars($fyLabel) ?>" <?= $fiscalYear === $fyLabel ? 'selected' : '' ?>>
               <?= htmlspecialchars($fyLabel) ?>
@@ -2514,9 +2479,24 @@ if (!empty($curriculum)) {
                   error_log("DEBUG: Student data: " . print_r($student, true));
                   error_log("DEBUG: isRegular result: " . ($isRegular ? 'true' : 'false'));
                   
-                  // Check prerequisites for all students (not just irregular)#c6282
-                  $prereq = trim($prereq);
-                  $shouldCheckPrereq = !empty($prereq) && !in_array(strtolower($prereq), ['none', 'n/a', '-', '', 'none ']);
+                    // Check prerequisites for all students (not just irregular)#c6282
+                    $prereq = trim($prereq);
+                    $shouldCheckPrereq = !empty($prereq) && !in_array(strtolower($prereq), ['none', 'n/a', '-', '', 'none ']);
+
+                    // Special case: for Capstone Project 1 rows where the PRE-REQ
+                    // label is an abstract string like "ALL PRE-REQ", do NOT
+                    // treat that text as a concrete course code prerequisite.
+                    // The real blocking for Capstone 1 is handled by the
+                    // $capstoneBlockedByMajors flag based on all earlier
+                    // major-with-prereq subjects. This prevents a passed
+                    // Capstone 1 grade from being styled as failed/red.
+                    if ($isCapstone1 && $shouldCheckPrereq) {
+                      $label = strtolower(preg_replace('/\s+/', ' ', $prereq));
+                      if (strpos($label, 'all pre-req') !== false || strpos($label, 'all prereq') !== false) {
+                        $shouldCheckPrereq = false;
+                        error_log("Capstone 1: ignoring textual PRE-REQ label '$prereq' for per-subject prerequisite check.");
+                      }
+                    }
                   
                   // Check if this is a classification-based prerequisite (like "Regular 3rd Year")
                   $isClassificationPrereq = false;
@@ -2667,19 +2647,26 @@ if (!empty($curriculum)) {
                     $isFailed = false;
                     $normalizedGradeCode = normalizeCourseCode($code);
                     if (isset($gradesByCode[$normalizedGradeCode])) {
-                        $grade = $gradesByCode[$normalizedGradeCode];
-                        if (is_numeric($grade)) {
-                            $gradeValue = floatval($grade);
-                            if ($gradeValue <= 3.25) {
-                                $isPassed = true;
-                            } elseif ($gradeValue >= 5.0) {
-                                $isFailed = true;
-                                // If failed, don't consider it as in irregular_db for display purposes
-                                $isInIrregularDb = false;
-                            }
-                        } elseif (is_string($grade) && strtoupper(trim($grade)) === 'PASSED') {
-                            $isPassed = true;
+                      $grade = $gradesByCode[$normalizedGradeCode];
+                      if (is_numeric($grade)) {
+                        $gradeValue = floatval($grade);
+                        if ($gradeValue <= 3.25) {
+                          $isPassed = true;
+                        } elseif ($gradeValue >= 5.0) {
+                          $isFailed = true;
+                          // If failed, don't consider it as in irregular_db for display purposes
+                          $isInIrregularDb = false;
                         }
+                      } elseif (is_string($grade)) {
+                        $gradeUpper = strtoupper(trim($grade));
+                        if ($gradeUpper === 'PASSED') {
+                          $isPassed = true;
+                        } elseif (in_array($gradeUpper, ['FAILED', 'FAIL'], true)) {
+                          $isFailed = true;
+                          // Treat textual FAILED the same as numeric 5.0 for selection rules
+                          $isInIrregularDb = false;
+                        }
+                      }
                     }
                     // Extra rule: if the student has no subjects in 1st Year • 1st Semester
                     // and this subject is in specified later semesters with PRE-REQ of 'None',
@@ -3315,7 +3302,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 
                 // Check unit limits
-                const maxUnits = unitLimits[program] && unitLimits[program][yearSem] ? unitLimits[program][yearSem].max : 26;
+                let maxUnits = unitLimits[program] && unitLimits[program][yearSem] ? unitLimits[program][yearSem].max : 26;
+
+                // Special rule: if student is irregular and semester is 4-2,
+                // cap the irregular load at 9 units regardless of curriculum.
+                const cls = (window.studentClassification || '').toLowerCase();
+                if (yearSem === '4-2' && cls.includes('irregular')) {
+                  maxUnits = Math.min(maxUnits, 9.0);
+                }
+
                 const totalUnitsAfter = currentUnits + newUnits;
                 
                 // Check if adding this subject would exceed the limit
@@ -4050,7 +4045,13 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         
         const totalUnitsAfter = currentUnits + selectedUnits;
-        const maxUnits = unitLimits[program] && unitLimits[program][yearSem] ? unitLimits[program][yearSem].max : 26;
+        let maxUnits = unitLimits[program] && unitLimits[program][yearSem] ? unitLimits[program][yearSem].max : 26;
+
+        // Special rule: irregular students in 4-2 may take up to 9 units
+        const cls = (window.studentClassification || '').toLowerCase();
+        if (yearSem === '4-2' && cls.includes('irregular')) {
+          maxUnits = Math.max(maxUnits, 9.0);
+        }
         
         // Check if adding these subjects would exceed the limit
         if (totalUnitsAfter > maxUnits) {
@@ -4143,19 +4144,51 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         })
         .catch(error => {
-            console.error('Error:', error);
+          console.error('Error:', error);
           Swal.fire({
-            icon: 'error',
-            title: 'Error',
-            text: 'Error saving subjects. Please try again.',
-            confirmButtonText: 'OK'
+          icon: 'error',
+          title: 'Error',
+          text: 'Error saving subjects. Please try again.',
+          confirmButtonText: 'OK'
           });
         });
+      });
     });
-});
 
-// Handle Edit Prerequisite Modal
-document.addEventListener('DOMContentLoaded', function() {
+    // Global guard: block evaluation UI when enrollment period is closed
+    document.addEventListener('DOMContentLoaded', function() {
+      if (typeof window.evaluationOpen !== 'undefined' && !window.evaluationOpen) {
+        const msg = (window.enrollmentPeriodMessage || '').trim() ||
+          'The enrollment period for evaluation is currently closed.';
+
+        if (typeof Swal !== 'undefined') {
+          Swal.fire({
+            icon: 'info',
+            title: 'Evaluation Closed',
+            text: msg,
+            confirmButtonText: 'OK'
+          });
+        } else {
+          alert(msg);
+        }
+
+        const selectors = [
+          'button',
+          'input[type="submit"]',
+          'input[type="button"]',
+          'select',
+          'input[type="checkbox"]',
+          'input[type="radio"]'
+        ];
+
+        document.querySelectorAll(selectors.join(',')).forEach(el => {
+          el.disabled = true;
+        });
+      }
+    });
+
+    // Handle Edit Prerequisite Modal
+    document.addEventListener('DOMContentLoaded', function() {
     const editPrereqModal = document.getElementById('editPrereqModal');
     if (editPrereqModal) {
         editPrereqModal.addEventListener('show.bs.modal', function(event) {

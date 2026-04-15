@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once '../db_connect.php';
+/** @var mysqli $conn */
 
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
@@ -13,6 +14,7 @@ $message = '';
 $success = false;
 
 // Fetch user data with role name and e-signature (excluding contact if not available)
+/** @var mysqli_stmt|null $stmt */
 $stmt = $conn->prepare("SELECT s.id, s.firstname, s.lastname, s.email, s.password, s.role_id, s.profile_image, s.esignature, r.role_name 
                       FROM signin_db s 
                       LEFT JOIN roles r ON s.role_id = r.role_id 
@@ -40,6 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     // Handle e-signature upload
     $esignature_filename = $user['esignature'] ?? '';
+    $signature_upload_success = false;
     
     // Debug: Check if file was uploaded
     error_log('Complete FILES array: ' . print_r($_FILES, true));
@@ -106,6 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } else {
         // Check if email is already taken by another user
+        /** @var mysqli_stmt|null $stmt */
         $stmt = $conn->prepare("SELECT id FROM signin_db WHERE email = ? AND id != ?");
         $stmt->bind_param("si", $email, $user_id);
         $stmt->execute();
@@ -128,10 +132,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (password_verify($current_password, $user['password'])) {
                     if ($new_password === $confirm_password) {
                         if (strlen($new_password) >= 8) {
-                            $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
-                            $password_update_sql = ", password = ?";
-                            $password_params[] = $hashed_password;
-                            $password_types = "s";
+                            // Require at least 1 uppercase letter and 1 special character
+                            if (!preg_match('/[A-Z]/', $new_password) || !preg_match('/[\W_]/', $new_password)) {
+                                $message = 'New password must contain at least one uppercase letter and one special character';
+                            } else {
+                                $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
+                                $password_update_sql = ", password = ?";
+                                $password_params[] = $hashed_password;
+                                $password_types = "s";
+                            }
                         } else {
                             $message = 'New password must be at least 8 characters long';
                         }
@@ -194,6 +203,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $success = true;
                         
                         // Refresh user data
+                        /** @var mysqli_stmt|null $refreshStmt */
                         $refreshStmt = $conn->prepare("SELECT * FROM signin_db WHERE id = ?");
                         $refreshStmt->bind_param("i", $user_id);
                         $refreshStmt->execute();
@@ -526,17 +536,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <div class="col-md-6 mb-3">
                             <label for="new_password" class="form-label">New Password</label>
                             <div class="input-group">
-                                <input type="password" class="form-control" id="new_password" name="new_password">
+                                <input type="password" class="form-control" id="new_password" name="new_password" minlength="8" pattern="(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}" title="At least 8 characters, including 1 uppercase and 1 special character">
                                 <button class="btn btn-outline-secondary toggle-password" type="button" data-target="new_password">
                                     <i class="fas fa-eye"></i>
                                 </button>
                             </div>
-                            <small class="text-muted">Leave blank to keep current password</small>
+                            <small class="text-muted">Leave blank to keep current password. Must have at least 8 characters, 1 uppercase letter, and 1 special character.</small>
                         </div>
                         <div class="col-md-6 mb-3">
                             <label for="confirm_password" class="form-label">Confirm New Password</label>
                             <div class="input-group">
-                                <input type="password" class="form-control" id="confirm_password" name="confirm_password">
+                                <input type="password" class="form-control" id="confirm_password" name="confirm_password" minlength="8" pattern="(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}" title="Must match the new password and include 1 uppercase and 1 special character">
                                 <button class="btn btn-outline-secondary toggle-password" type="button" data-target="confirm_password">
                                     <i class="fas fa-eye"></i>
                                 </button>
@@ -622,18 +632,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             const newPassword = document.getElementById('new_password').value;
             const confirmPassword = document.getElementById('confirm_password').value;
             
-            if (newPassword !== confirmPassword) {
-                e.preventDefault();
-                alert('New password and confirm password do not match');
-                return false;
+            // Only validate if user is trying to change password
+            if (newPassword.length > 0 || confirmPassword.length > 0) {
+                if (newPassword !== confirmPassword) {
+                    e.preventDefault();
+                    alert('New password and confirm password do not match');
+                    return false;
+                }
+
+                if (newPassword.length < 8) {
+                    e.preventDefault();
+                    alert('Password must be at least 8 characters long');
+                    return false;
+                }
+
+                const uppercaseRegex = /[A-Z]/;
+                const specialCharRegex = /[\W_]/;
+
+                if (!uppercaseRegex.test(newPassword) || !specialCharRegex.test(newPassword)) {
+                    e.preventDefault();
+                    alert('Password must contain at least 1 uppercase letter and 1 special character');
+                    return false;
+                }
             }
-            
-            if (newPassword.length > 0 && newPassword.length < 8) {
-                e.preventDefault();
-                alert('Password must be at least 8 characters long');
-                return false;
-            }
-            
+
             return true;
         });
     </script>

@@ -443,152 +443,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['grade'])) {
 
 // AJAX: return irregular subjects for a student and semester
 if (isset($_GET['action']) && $_GET['action'] === 'get_irregular') {
-    header('Content-Type: application/json');
-    $student_id = trim($_GET['student_id'] ?? '');
-    $ys = trim($_GET['ys'] ?? ''); // format expected: '1-1'
+  header('Content-Type: application/json');
+  $student_id = trim($_GET['student_id'] ?? '');
+  $ys = trim($_GET['ys'] ?? ''); // format expected: '1-1'
 
-    // Debug logging
-    error_log("=== DEBUG: get_irregular called ===");
-    error_log("Student ID: $student_id");
-    error_log("Year-Semester: $ys");
+  // Basic parameter validation
+  if ($student_id === '' || $ys === '') {
+  echo json_encode(['success' => false, 'data' => [], 'message' => 'Missing parameters']);
+  exit;
+  }
 
-    if ($student_id === '' || $ys === '') {
-        $error = 'Missing parameters: ' . ($student_id === '' ? 'student_id, ' : '') . ($ys === '' ? 'ys' : '');
-        error_log("ERROR: $error");
-        echo json_encode(['success' => false, 'data' => [], 'message' => $error]);
-        exit;
-    }
+  [$y, $s] = array_map('intval', explode('-', $ys));
 
-    // Parse year and semester
-    $parts = explode('-', $ys);
-    if (count($parts) !== 2) {
-        $error = "Invalid year-semester format: $ys (expected format: 'Y-S' where Y is year and S is semester)";
-        error_log("ERROR: $error");
-        echo json_encode(['success' => false, 'data' => [], 'message' => $error]);
-        exit;
-    }
-    
-    $y = intval($parts[0]);
-    $s = intval($parts[1]);
-    
-    // Debug logging
-    error_log("Parsed - Year: $y, Semester: $s");
+  // Determine actual column names in irregular_db (handles year_level/year and semester/sem)
+  $colsRes = $conn->query('SHOW COLUMNS FROM irregular_db');
+  $columns = [];
+  while ($c = $colsRes->fetch_assoc()) {
+  $columns[] = $c['Field'];
+  }
 
-    // First, try to get the data using the standard column names
-    $sql = "SELECT 
-                id, 
-                course_code, 
-                course_title, 
-                lec_units, 
-                lab_units, 
-                total_units,
-                prerequisites,
-                status,
-                program
-            FROM irregular_db 
-            WHERE student_id = ? 
-            AND year_level = ? 
-            AND semester = ?";
-    
-    // Debug logging
-    error_log("Generated SQL: $sql");
-    error_log("With parameters: student_id=$student_id, year_level=$y, semester=$s");
+  $yearCol   = in_array('year_level', $columns, true) ? 'year_level' : (in_array('year', $columns, true) ? 'year' : 'year_level');
+  $semCol    = in_array('semester', $columns, true)   ? 'semester'   : (in_array('sem', $columns, true)   ? 'sem'   : 'semester');
+  $lecCol    = in_array('lec_units', $columns, true)  ? 'lec_units'  : (in_array('lecture_units', $columns, true) ? 'lecture_units' : null);
+  $labCol    = in_array('lab_units', $columns, true)  ? 'lab_units'  : null;
+  $totalCol  = in_array('total_units', $columns, true) ? 'total_units' : (in_array('units', $columns, true) ? 'units' : null);
+  $statusCol = in_array('status', $columns, true)     ? 'status'     : null;
 
-    $stmt = $conn->prepare($sql);
-    if (!$stmt) {
-        $error = 'Failed to prepare statement: ' . $conn->error;
-        error_log("ERROR: $error");
-        
-        // If the first query fails, try with alternative column names
-        $sql = "SELECT 
-                    id, 
-                    course_code, 
-                    course_title, 
-                    lec_units, 
-                    lab_units, 
-                    total_units,
-                    prerequisites,
-                    status,
-                    program
-                FROM irregular_db 
-                WHERE student_id = ? 
-                AND year = ? 
-                AND sem = ?";
-        
-        error_log("Trying alternative query with year/sem columns");
-        $stmt = $conn->prepare($sql);
-        
-        if (!$stmt) {
-            $error = 'Failed to prepare alternative statement: ' . $conn->error;
-            error_log("ERROR: $error");
-            echo json_encode(['success' => false, 'data' => [], 'message' => 'Database error']);
-            exit;
-        }
-    }
-    
-    $stmt->bind_param('sii', $student_id, $y, $s);
-    $executed = $stmt->execute();
-    
-    if ($executed === false) {
-        $error = 'Failed to execute query: ' . $stmt->error;
-        error_log("ERROR: $error");
-        echo json_encode(['success' => false, 'data' => [], 'message' => 'Failed to fetch data']);
-        exit;
-    }
-    
-    $res = $stmt->get_result();
-    if ($res === false) {
-        $error = 'Failed to get result set: ' . $stmt->error;
-        error_log("ERROR: $error");
-        echo json_encode(['success' => false, 'data' => [], 'message' => 'Failed to process results']);
-        exit;
-    }
-    
-    $rows = [];
-    while ($r = $res->fetch_assoc()) {
-        $rows[] = $r;
-    }
-    
-    // Debug logging
-    $rowCount = count($rows);
-    error_log("Query returned $rowCount rows");
-    if ($rowCount > 0) {
-        error_log("First row data: " . json_encode($rows[0]));
-    } else {
-        error_log("No rows found for student $student_id, year $y, semester $s");
-        
-        // Try one more time with a more permissive query in case of data issues
-        $sql = "SELECT 
-                    id, 
-                    course_code, 
-                    course_title, 
-                    lec_units, 
-                    lab_units, 
-                    total_units,
-                    prerequisites,
-                    status,
-                    program
-                FROM irregular_db 
-                WHERE student_id = ? 
-                AND (year_level = ? OR year = ?)
-                AND (semester = ? OR sem = ?)";
-        
-        $stmt = $conn->prepare($sql);
-        if ($stmt) {
-            $stmt->bind_param('siiii', $student_id, $y, $y, $s, $s);
-            if ($stmt->execute()) {
-                $res = $stmt->get_result();
-                while ($r = $res->fetch_assoc()) {
-                    $rows[] = $r;
-                }
-                $rowCount = count($rows);
-                error_log("Alternative query returned $rowCount rows");
-            }
-        }
-    }
-    
-    echo json_encode(['success' => true, 'data' => $rows]);
-    exit;
+  // Build a safe SELECT list using only existing columns
+  $selectCols = ['id', 'course_code', 'course_title'];
+  $selectCols[] = $lecCol   ? "$lecCol AS lec_units"   : '0 AS lec_units';
+  $selectCols[] = $labCol   ? "$labCol AS lab_units"   : '0 AS lab_units';
+  $selectCols[] = $totalCol ? "$totalCol AS total_units" : '0 AS total_units';
+  if ($statusCol) {
+  $selectCols[] = "$statusCol AS status";
+  }
+
+  $sql = 'SELECT ' . implode(',', $selectCols) . " FROM irregular_db WHERE student_id = ? AND $yearCol = ? AND $semCol = ?";
+  $stmt = $conn->prepare($sql);
+  if (!$stmt) {
+  echo json_encode(['success' => false, 'data' => [], 'message' => 'DB error: ' . $conn->error]);
+  exit;
+  }
+
+  $stmt->bind_param('sii', $student_id, $y, $s);
+  $stmt->execute();
+  $res = $stmt->get_result();
+  $rows = [];
+  while ($r = $res->fetch_assoc()) {
+  $rows[] = $r;
+  }
+
+  echo json_encode(['success' => true, 'data' => $rows]);
+  exit;
 }
 
 // Handle delete irregular subject
@@ -1255,6 +1161,15 @@ $unitLimits = [
     ]
 ];
 
+    // Special rule: if the current student is IRREGULAR,
+    // cap the 4-2 irregular-load limit at 9 units.
+    $studentClassification = strtolower(trim($student['classification'] ?? ''));
+    if (strpos($studentClassification, 'irregular') !== false) {
+      if (isset($unitLimits[$program]['4-2'])) {
+        $unitLimits[$program]['4-2']['max'] = 9.0;
+      }
+    }
+
 // Use the unit limits for labels if available, otherwise fallback to default
 $labels = [];
 foreach ($ysOrder as $ys) {
@@ -1287,6 +1202,14 @@ foreach ($ysOrder as $ys) {
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script>
+    // Expose passed subject codes (normalized) for client-side prerequisite validation
+    window.passedSubjects = <?php echo json_encode(array_keys($passedSubjects ?? [])); ?>;
+    // Flag: does the student have any subjects in 1st Year 
+    window.hasFirstYearFirstSem = <?php echo $hasFirstYearFirstSemGrade ? 'true' : 'false'; ?>;
+    // Expose student classification for client-side rules (e.g., irregular caps)
+    window.studentClassification = <?php echo json_encode($student['classification'] ?? ''); ?>;
+  </script>
 
   <style>
     /* Irregular subject styling */
@@ -1632,10 +1555,10 @@ foreach ($ysOrder as $ys) {
   </div>
   <div class="container my-4">
     <form method="GET" class="row g-2 align-items-end mb-3">
-      <div class="col-sm-4">
-        <label class="form-label">Student ID</label>
+      <div class="col-sm-3">
+        <label class="form-label">Curriculum</label>
         <input type="text" name="student_id" class="form-control" value="<?= htmlspecialchars($studentId) ?>" required>
-      </div>
+          <option value="">Select Curriculum...</option>
       <div class="col-sm-3">
         <label class="form-label">Program</label>
         <select name="program" class="form-select">
@@ -2404,19 +2327,26 @@ if (!empty($curriculum)) {
                     $isFailed = false;
                     $normalizedGradeCode = normalizeCourseCode($code);
                     if (isset($gradesByCode[$normalizedGradeCode])) {
-                        $grade = $gradesByCode[$normalizedGradeCode];
-                        if (is_numeric($grade)) {
-                            $gradeValue = floatval($grade);
-                            if ($gradeValue <= 3.25) {
-                                $isPassed = true;
-                            } elseif ($gradeValue >= 5.0) {
-                                $isFailed = true;
-                                // If failed, don't consider it as in irregular_db for display purposes
-                                $isInIrregularDb = false;
-                            }
-                        } elseif (is_string($grade) && strtoupper(trim($grade)) === 'PASSED') {
-                            $isPassed = true;
+                      $grade = $gradesByCode[$normalizedGradeCode];
+                      if (is_numeric($grade)) {
+                        $gradeValue = floatval($grade);
+                        if ($gradeValue <= 3.25) {
+                          $isPassed = true;
+                        } elseif ($gradeValue >= 5.0) {
+                          $isFailed = true;
+                          // If failed, don't consider it as in irregular_db for display purposes
+                          $isInIrregularDb = false;
                         }
+                      } elseif (is_string($grade)) {
+                        $gradeUpper = strtoupper(trim($grade));
+                        if ($gradeUpper === 'PASSED') {
+                          $isPassed = true;
+                        } elseif (in_array($gradeUpper, ['FAILED', 'FAIL'], true)) {
+                          $isFailed = true;
+                          // Treat textual FAILED the same as numeric 5.0 for selection rules
+                          $isInIrregularDb = false;
+                        }
+                      }
                     }
                     ?>
                     <?php if ($prereqFailed && !$isRegular): ?>
@@ -2970,7 +2900,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 
                 // Check unit limits
-                const maxUnits = unitLimits[program] && unitLimits[program][yearSem] ? unitLimits[program][yearSem].max : 26;
+                let maxUnits = unitLimits[program] && unitLimits[program][yearSem] ? unitLimits[program][yearSem].max : 26;
+
+                // Special rule: if student is irregular and semester is 4-2,
+                // cap the irregular load at 9 units.
+                const cls = (window.studentClassification || '').toLowerCase();
+                if (yearSem === '4-2' && cls.includes('irregular')) {
+                  maxUnits = Math.min(maxUnits, 9.0);
+                }
+
                 const totalUnitsAfter = currentUnits + newUnits;
                 
                 // Check if adding this subject would exceed the limit

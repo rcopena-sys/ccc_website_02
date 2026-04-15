@@ -1,6 +1,10 @@
 <?php
 session_start();
 require_once __DIR__ . '/../db_connect.php';
+
+// When opened inside the registrar modal iframe, we hide the internal sidebar
+// and use the full width for the prospectus content.
+$isModalEmbed = isset($_GET['from_modal']) && $_GET['from_modal'] === '1';
 // Check if a student is regular based on classification
 function isRegularStudent($studentData) {
     if (!isset($studentData['classification'])) {
@@ -1722,9 +1726,23 @@ foreach ($ysOrder as $ys) {
       background-color: #dc3545 !important;
       color: white !important;
     }
+
+    /* Layout adjustments when embedded in registrar iframe modal */
+    body.modal-embed {
+      margin: 0;
+      padding: 0;
+      background: #f8f9fa;
+    }
+    body.modal-embed .sidebar {
+      display: none;
+    }
+    body.modal-embed .main-content {
+      margin-left: 0;
+      width: 100%;
+    }
   </style>
 </head>
-<body>
+<body class="<?= $isModalEmbed ? 'modal-embed' : '' ?>">
   <!-- Sidebar -->
   <div class="sidebar">
     <div class="d-flex flex-column align-items-center mb-4">

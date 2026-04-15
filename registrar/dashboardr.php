@@ -8,6 +8,100 @@ if (!isset($_SESSION['user_id']) || ($_SESSION['role_id'] != 2 && $_SESSION['rol
 
 require_once '../db_connect.php';
 
+// --- Enrollment period save handler (AJAX from modal) ---
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['action']) && $_POST['action'] === 'save_enrollment_period'
+) {
+    header('Content-Type: application/json');
+
+    $start = trim($_POST['start_datetime'] ?? '');
+    $end   = trim($_POST['end_datetime'] ?? '');
+
+    if ($start === '' || $end === '') {
+        echo json_encode(['success' => false, 'message' => 'Both start and end date/time are required.']);
+        exit;
+    }
+
+    $startTs = strtotime($start);
+    $endTs   = strtotime($end);
+    if ($startTs === false || $endTs === false) {
+        echo json_encode(['success' => false, 'message' => 'Invalid date/time format.']);
+        exit;
+    }
+    if ($endTs <= $startTs) {
+        echo json_encode(['success' => false, 'message' => 'End time must be after start time.']);
+        exit;
+    }
+
+    // Ensure table exists
+    $createSql = "CREATE TABLE IF NOT EXISTS enrollment_periods (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        page VARCHAR(50) NOT NULL,
+        start_datetime DATETIME NOT NULL,
+        end_datetime DATETIME NOT NULL,
+        created_by INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_page (page)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+    if (!$conn->query($createSql)) {
+        echo json_encode(['success' => false, 'message' => 'DB error creating table: ' . $conn->error]);
+        exit;
+    }
+
+    // Upsert enrollment period specifically for the admin evaluation page (stueval.php)
+    $pageKey = 'stueval';
+    $startDb = date('Y-m-d H:i:s', $startTs);
+    $endDb   = date('Y-m-d H:i:s', $endTs);
+    $createdBy = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
+
+    $sql = "INSERT INTO enrollment_periods (page, start_datetime, end_datetime, created_by)
+            VALUES (?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              start_datetime = VALUES(start_datetime),
+              end_datetime   = VALUES(end_datetime),
+              created_by     = VALUES(created_by)";
+
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        echo json_encode(['success' => false, 'message' => 'DB error: ' . $conn->error]);
+        exit;
+    }
+    $stmt->bind_param('sssi', $pageKey, $startDb, $endDb, $createdBy);
+    $ok = $stmt->execute();
+    $stmt->close();
+
+    if (!$ok) {
+        echo json_encode(['success' => false, 'message' => 'Failed to save enrollment period.']);
+    } else {
+        echo json_encode(['success' => true, 'message' => 'Enrollment period saved successfully.']);
+    }
+    exit;
+}
+
+// Load current enrollment period for stueval.php (if any) to prefill the modal
+$currentEnrollment = null;
+try {
+    $checkSql = "SHOW TABLES LIKE 'enrollment_periods'";
+    $res = $conn->query($checkSql);
+    if ($res && $res->num_rows > 0) {
+        $pageKey = 'stueval';
+        $stmt = $conn->prepare("SELECT start_datetime, end_datetime FROM enrollment_periods WHERE page = ? LIMIT 1");
+        if ($stmt) {
+            $stmt->bind_param('s', $pageKey);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            if ($row = $result->fetch_assoc()) {
+                $currentEnrollment = $row;
+            }
+            $stmt->close();
+        }
+    }
+} catch (Exception $e) {
+    // Fail silently for dashboard if table is missing
+}
+
 // Initialize user data
 $user = [
     'firstname' => '',
@@ -42,6 +136,15 @@ $bscs_count = $bscs_result ? (int)$bscs_result->fetch_assoc()['count'] : 0;
 $total_query = "SELECT COUNT(*) as count FROM students_db";
 $total_result = $conn->query($total_query);
 $total_count = $total_result ? (int)$total_result->fetch_assoc()['count'] : 0;
+
+// Count Regular and Irregular students
+$regular_query = "SELECT COUNT(*) as count FROM signin_db WHERE role_id IN (4, 5, 6) AND (classification IS NULL OR classification = '' OR classification = 'Regular')";
+$regular_result = $conn->query($regular_query);
+$regular_count = $regular_result ? (int)$regular_result->fetch_assoc()['count'] : 0;
+
+$irregular_query = "SELECT COUNT(*) as count FROM signin_db WHERE role_id IN (4, 5, 6) AND classification = 'Irregular'";
+$irregular_result = $conn->query($irregular_query);
+$irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['count'] : 0;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -52,6 +155,7 @@ $total_count = $total_result ? (int)$total_result->fetch_assoc()['count'] : 0;
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
         * {
             box-sizing: border-box;
@@ -189,7 +293,7 @@ $total_count = $total_result ? (int)$total_result->fetch_assoc()['count'] : 0;
             <a href="registrar.php" class="nav-link">Student List</a>
             <a href="student_evaluation.php" class="nav-link"><i class="fas fa-clipboard-check"></i> Student Evaluation</a>
             <a href="studentgrade.php" class="nav-link">Student Grade</a>
-            <a href="fiscal_year.php" class="nav-link"><i class="fas fa-calendar"></i> Fiscal Year</a>
+            <a href="#" id="enrollmentPeriodLink" class="nav-link"><i class="fas fa-calendar"></i> Enrollment Period</a>
             <a href="feedbackr.php" class="nav-link">Feedback</a>
             <a href="profile.php" class="nav-link"><i class="fas fa-user"></i> Profile</a>
             <a href="../logout.php" class="nav-link"><i class="fas fa-sign-out-alt"></i> Logout</a>
@@ -231,9 +335,45 @@ $total_count = $total_result ? (int)$total_result->fetch_assoc()['count'] : 0;
                     </a>
                 </div>
             </div>
-            <div class="chart-container">
-                <div class="chart-area">
-                    <canvas id="deptBarChart"></canvas>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; width: 100%; max-width: 1200px;">
+                <div class="chart-container" style="margin: 0;">
+                    <div class="chart-area">
+                        <canvas id="deptBarChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-container" style="margin: 0;">
+                    <div class="chart-area">
+                        <canvas id="classificationBarChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Enrollment Period Modal -->
+            <div id="enrollmentModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:1000; align-items:center; justify-content:center;">
+                <div style="background:white; padding:20px 24px; border-radius:12px; width:100%; max-width:420px; box-shadow:0 10px 25px rgba(15,23,42,0.25);">
+                    <h3 style="margin-top:0; margin-bottom:12px; color:#111827;">Set Enrollment Period</h3>
+                    <p style="margin:0 0 16px; font-size:0.9rem; color:#4b5563;">
+                        This period will be used as the allowed time window for evaluating students in the Dean evaluation.
+                    </p>
+                    <div style="display:flex; flex-direction:column; gap:10px;">
+                        <label style="font-size:0.9rem; color:#374151;">Start date & time</label>
+                        <input type="datetime-local" id="enrollStart" style="padding:8px 10px; border-radius:6px; border:1px solid #d1d5db;" value="<?php
+                            if ($currentEnrollment && !empty($currentEnrollment['start_datetime'])) {
+                                echo htmlspecialchars(date('Y-m-d\TH:i', strtotime($currentEnrollment['start_datetime'])));
+                            }
+                        ?>">
+                        <label style="font-size:0.9rem; color:#374151; margin-top:8px;">End date & time</label>
+                        <input type="datetime-local" id="enrollEnd" style="padding:8px 10px; border-radius:6px; border:1px solid #d1d5db;" value="<?php
+                            if ($currentEnrollment && !empty($currentEnrollment['end_datetime'])) {
+                                echo htmlspecialchars(date('Y-m-d\TH:i', strtotime($currentEnrollment['end_datetime'])));
+                            }
+                        ?>">
+                    </div>
+                    <div id="enrollMessage" style="margin-top:10px; font-size:0.85rem; color:#b91c1c; display:none;"></div>
+                    <div style="margin-top:18px; display:flex; justify-content:flex-end; gap:8px;">
+                        <button type="button" id="enrollCancelBtn" style="padding:8px 14px; border-radius:6px; border:1px solid #d1d5db; background:white; color:#374151; cursor:pointer;">Cancel</button>
+                        <button type="button" id="enrollSaveBtn" style="padding:8px 16px; border-radius:6px; border:none; background:#2563eb; color:white; font-weight:600; cursor:pointer;">Save</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -275,6 +415,135 @@ $total_count = $total_result ? (int)$total_result->fetch_assoc()['count'] : 0;
                 }
             }
         });
+
+        // Classification Chart - Regular vs Irregular Students
+        const ctxClass = document.getElementById('classificationBarChart').getContext('2d');
+        const classificationBarChart = new Chart(ctxClass, {
+            type: 'bar',
+            data: {
+                labels: ['Regular Students', 'Irregular Students'],
+                datasets: [{
+                    label: 'No. of Students',
+                    data: [<?php echo $regular_count; ?>, <?php echo $irregular_count; ?>],
+                    backgroundColor: [
+                        'rgba(34, 197, 94, 0.8)',   // Regular - Green
+                        'rgba(249, 115, 22, 0.8)'   // Irregular - Orange
+                    ],
+                    borderRadius: 8,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false },
+                    title: {
+                        display: true,
+                        text: 'Student Classification Distribution',
+                        font: { size: 18 }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        precision: 0,
+                        ticks: { stepSize: 1 }
+                    }
+                }
+            }
+        });
+
+        // Enrollment Period modal logic
+        const enrollmentLink = document.getElementById('enrollmentPeriodLink');
+        const enrollmentModal = document.getElementById('enrollmentModal');
+        const enrollCancelBtn = document.getElementById('enrollCancelBtn');
+        const enrollSaveBtn = document.getElementById('enrollSaveBtn');
+        const enrollMessage = document.getElementById('enrollMessage');
+
+        function openEnrollmentModal() {
+            if (enrollmentModal) {
+                enrollmentModal.style.display = 'flex';
+                enrollMessage.style.display = 'none';
+                enrollMessage.textContent = '';
+            }
+        }
+
+        function closeEnrollmentModal() {
+            if (enrollmentModal) {
+                enrollmentModal.style.display = 'none';
+            }
+        }
+
+        if (enrollmentLink) {
+            enrollmentLink.addEventListener('click', function (e) {
+                e.preventDefault();
+                openEnrollmentModal();
+            });
+        }
+        if (enrollCancelBtn) {
+            enrollCancelBtn.addEventListener('click', function () {
+                closeEnrollmentModal();
+            });
+        }
+        if (enrollmentModal) {
+            enrollmentModal.addEventListener('click', function (e) {
+                if (e.target === enrollmentModal) {
+                    closeEnrollmentModal();
+                }
+            });
+        }
+
+        if (enrollSaveBtn) {
+            enrollSaveBtn.addEventListener('click', function () {
+                const startInput = document.getElementById('enrollStart');
+                const endInput = document.getElementById('enrollEnd');
+                const startVal = startInput.value;
+                const endVal = endInput.value;
+
+                if (!startVal || !endVal) {
+                    enrollMessage.textContent = 'Please fill in both start and end date/time.';
+                    enrollMessage.style.display = 'block';
+                    return;
+                }
+
+                const formData = new URLSearchParams();
+                formData.append('action', 'save_enrollment_period');
+                formData.append('start_datetime', startVal);
+                formData.append('end_datetime', endVal);
+
+                fetch('dashboardr.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: formData.toString()
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) {
+                        enrollMessage.textContent = data.message || 'Failed to save enrollment period.';
+                        enrollMessage.style.display = 'block';
+                    } else {
+                        // Close modal and show SweetAlert success message
+                        closeEnrollmentModal();
+                        enrollMessage.style.display = 'none';
+                        enrollMessage.style.color = '#b91c1c';
+
+                        if (window.Swal) {
+                            Swal.fire({
+                                icon: 'success',
+                                title: 'Enrollment period set',
+                                text: data.message || 'Enrollment period saved successfully.',
+                                confirmButtonText: 'OK'
+                            });
+                        }
+                    }
+                })
+                .catch(err => {
+                    enrollMessage.textContent = 'Error saving enrollment period.';
+                    enrollMessage.style.display = 'block';
+                    console.error(err);
+                });
+            });
+        }
     </script>
 </body>
 </html>

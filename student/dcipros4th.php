@@ -94,17 +94,7 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['student_id'])) {
     header("Location: index.php");
     exit();
 }
-session_start();
-$servername = "localhost";
-$username = "u220649928_public_html";
-$password = "RoZz_puGeCivic96Vti";
-$dbname = "u220649928_ccc_curriculum";
-
-$conn = new mysqli($servername, $username, $password, $dbname);
-
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
+require_once __DIR__ . '/../db_connect.php';
 
 // Initialize student data
 $student_id = $_SESSION['student_id'];
@@ -1081,19 +1071,16 @@ function calculateYearlyUnits($courses) {
             </div>
         
         <?php
-        // Database connection for curriculum
-      session_start();
-$servername = "localhost";
-$username = "u220649928_public_html";
-$password = "RoZz_puGeCivic96Vti";
-$dbname = "u220649928_ccc_curriculum";
+        // Database connection for curriculum (reuse global $conn from db_connect.php)
+        // Ensure $db is set for debug based on environment
+        if (!isset($db)) {
+            if (defined('APP_ENV') && APP_ENV === 'production') {
+                $db = 'u220649928_ccc_curriculum';
+            } else {
+                $db = 'ccc_curriculum_evaluation';
+            }
+        }
 
-$conn = new mysqli($servername, $username, $password, $dbname);
-
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
-        
         // Debug: Show database being used
         echo '<!-- Using database: ' . $db . ' -->';
         

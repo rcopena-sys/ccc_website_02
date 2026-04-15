@@ -843,7 +843,7 @@ if ($result) {
                                    title="First name must contain at least one capital letter and can include letters, spaces, or special characters only"
                                    required>
                             <div class="invalid-feedback">
-                                First name must contain at least one capital letter and can include letters, spaces, or special characters only
+                                
                             </div>
                         </div>
                         <div>
@@ -854,7 +854,7 @@ if ($result) {
                                    title="Last name must contain at least one capital letter and can include letters, spaces, or special characters only"
                                    required>
                             <div class="invalid-feedback">
-                                Last name must contain at least one capital letter and can include letters, spaces, or special characters only
+                              
                             </div>
                         </div>
                     </div>
@@ -924,7 +924,7 @@ if ($result) {
                                 <?php endforeach; ?>
                             </select>
                             <div class="invalid-feedback">
-                                Please select a role
+                                 select a role
                             </div>
                         </div>
                     </div>

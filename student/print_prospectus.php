@@ -69,6 +69,10 @@ $semesters = ['1-1', '1-2', '2-1', '2-2', '3-1', '3-2', '4-1', '4-2'];
 foreach ($semesters as $semester) {
     $curriculum_data[$semester] = [];
     
+    // Track seen course codes and titles per semester to avoid duplicates
+    $seen_course_codes = [];
+    $seen_course_titles = [];
+    
     // Try multiple approaches to get courses
     $courses_found = false;
     
@@ -86,6 +90,24 @@ foreach ($semesters as $semester) {
     
     if ($course_result->num_rows > 0) {
         while ($course = $course_result->fetch_assoc()) {
+            $rawCode  = $course['course_code'] ?? '';
+            $rawTitle = $course['course_title'] ?? '';
+
+            // Normalize code (remove spaces and non-alphanumerics) and title (collapse spaces, case-insensitive)
+            $codeKey  = preg_replace('/[^A-Z0-9]/', '', strtoupper(trim($rawCode)));
+            $titleKey = strtolower(preg_replace('/\s+/', ' ', trim($rawTitle)));
+
+            if (($codeKey !== '' && isset($seen_course_codes[$codeKey])) ||
+                ($titleKey !== '' && isset($seen_course_titles[$titleKey]))) {
+                continue; // Skip duplicate code/title within the same semester
+            }
+
+            if ($codeKey !== '') {
+                $seen_course_codes[$codeKey] = true;
+            }
+            if ($titleKey !== '') {
+                $seen_course_titles[$titleKey] = true;
+            }
             $curriculum_data[$semester][] = $course;
             echo "<!-- Debug: Course found - Code: " . htmlspecialchars($course['course_code']) . ", Title: " . htmlspecialchars($course['course_title']) . " -->";
         }
@@ -108,6 +130,23 @@ foreach ($semesters as $semester) {
         
         if ($course_result->num_rows > 0) {
             while ($course = $course_result->fetch_assoc()) {
+                $rawCode  = $course['course_code'] ?? '';
+                $rawTitle = $course['course_title'] ?? '';
+
+                $codeKey  = preg_replace('/[^A-Z0-9]/', '', strtoupper(trim($rawCode)));
+                $titleKey = strtolower(preg_replace('/\s+/', ' ', trim($rawTitle)));
+
+                if (($codeKey !== '' && isset($seen_course_codes[$codeKey])) ||
+                    ($titleKey !== '' && isset($seen_course_titles[$titleKey]))) {
+                    continue; // Skip duplicate code/title within the same semester
+                }
+
+                if ($codeKey !== '') {
+                    $seen_course_codes[$codeKey] = true;
+                }
+                if ($titleKey !== '') {
+                    $seen_course_titles[$titleKey] = true;
+                }
                 $curriculum_data[$semester][] = $course;
                 echo "<!-- Debug: Course found - Code: " . htmlspecialchars($course['course_code']) . ", Title: " . htmlspecialchars($course['course_title']) . " -->";
             }

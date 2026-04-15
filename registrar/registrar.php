@@ -28,9 +28,39 @@ if ($row = $result->fetch_assoc()) {
 }
 $stmt->close();
 
+// Ensure classification in students_db matches classification in signin_db
+// (especially for "irregular" students) based on student_id
+$syncClassificationSql = "UPDATE students_db s
+        INNER JOIN signin_db si ON s.student_id = si.student_id
+        SET s.classification = si.classification
+        WHERE si.classification IS NOT NULL
+            AND (s.classification IS NULL OR s.classification <> si.classification)";
+$conn->query($syncClassificationSql);
+
 // Fetch students data
 $students_query = "SELECT * FROM students_db ORDER BY student_name ASC";
 $students_result = $conn->query($students_query);
+
+// Prepare data for Tabulator
+$students_data = [];
+if ($students_result && $students_result->num_rows > 0) {
+    while ($student = $students_result->fetch_assoc()) {
+        $classification = isset($student['classification']) ? strtolower(trim($student['classification'])) : '';
+
+        $students_data[] = [
+            'student_id'    => $student['student_id'] ?? '',
+            'student_name'  => $student['student_name'] ?? '',
+            'email'         => $student['email'] ?? '',
+            'programs'      => $student['programs'] ?? '',
+            'academic_year' => $student['academic_year'] ?? '',
+            'semester'      => $student['semester'] ?? '',
+            'status'        => $student['status'] ?? '',
+            'gender'        => $student['gender'] ?? '',
+            'fiscal_year'   => $student['fiscal_year'] ?? '',
+            'classification'=> $classification,
+        ];
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -40,6 +70,8 @@ $students_result = $conn->query($students_query);
     <title>Student List</title>
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- Tabulator (Bootstrap 5 theme) -->
+    <link href="https://unpkg.com/tabulator-tables@5.5.0/dist/css/tabulator_bootstrap5.min.css" rel="stylesheet">
     <style>
         * {
             box-sizing: border-box;
@@ -172,26 +204,9 @@ $students_result = $conn->query($students_query);
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
             margin: 24px 0;
         }
-        .students-table {
+        /* Tabulator container will live inside students-container */
+        #studentsTabulator {
             width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }
-        .students-table th {
-            background: #f8fafc;
-            padding: 12px;
-            text-align: left;
-            font-weight: 600;
-            color: #374151;
-            border-bottom: 2px solid #e5e7eb;
-        }
-        .students-table td {
-            padding: 12px;
-            border-bottom: 1px solid #e5e7eb;
-            color: #374151;
-        }
-        .students-table tr:hover {
-            background: #f9fafb;
         }
         .header-actions {
             display: flex;
@@ -244,15 +259,16 @@ $students_result = $conn->query($students_query);
         <div class="content">
             <div class="header-actions">
                 <h2 style="color:#374151; margin: 0;">Student List</h2>
-                <div>
+                <div style="display: flex; gap: 10px;">
+                    <button type="button" class="btn btn-success" onclick="downloadCSV()">
+                        <i class="fas fa-download"></i> Download CSV
+                    </button>
                     <a href="addsturegs.php" class="btn btn-primary">
                         <i class="fas fa-plus"></i> Add Student
                     </a>
-                    
                 </div>
             </div>
             
-            <!-- Search Bar -->
             <div class="header-actions" style="margin-bottom: 20px;">
                 <div style="display: flex; gap: 10px; align-items: center; width: 100%;">
                     <input type="text" id="searchInput" class="form-control" placeholder="Search by Student ID, Name, Email, or Program..." style="flex: 1; padding: 10px; border: 1px solid #e5e7eb; border-radius: 8px;">
@@ -262,55 +278,54 @@ $students_result = $conn->query($students_query);
                 </div>
             </div>
             <div class="students-container">
-                <table class="students-table">
-                    <thead>
-                        <tr>
-                            <th>Student ID</th>
-                            <th>Student Name</th>
-                            <th>Email</th>
-                            <th>Program</th>
-                            <th>Academic Year</th>
-                            <th>Semester</th>
-                            <th>Status</th>
-                            <th>Gender</th>
-                            <th>Fiscal Year</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php
-                        if ($students_result && $students_result->num_rows > 0) {
-                            while ($student = $students_result->fetch_assoc()) {
-                                echo "<tr>";
-                                echo "<td>" . htmlspecialchars($student['student_id']) . "</td>";
-                                echo "<td>" . htmlspecialchars($student['student_name']) . "</td>";
-                                echo "<td>" . htmlspecialchars($student['email']) . "</td>";
-                                echo "<td>" . htmlspecialchars($student['programs']) . "</td>";
-                                echo "<td>" . htmlspecialchars($student['academic_year']) . "</td>";
-                                echo "<td>" . htmlspecialchars($student['semester']) . "</td>";
-                                echo "<td>" . htmlspecialchars($student['status']) . "</td>";
-                                echo "<td>" . htmlspecialchars($student['gender']) . "</td>";
-                                echo "<td>" . htmlspecialchars($student['fiscal_year']) . "</td>";
-                                echo "</tr>";
-                            }
-                        } else {
-                            echo "<tr><td colspan='9' style='text-align: center; padding: 40px; color: #6b7280;'>No students found</td></tr>";
-                        }
-                        ?>
-                    </tbody>
-                </table>
+                <div id="studentsTabulator"></div>
             </div>
         </div>
     </div>
+    <!-- Prospectus modal (loads student_evaluation.php in an iframe) -->
+    <div id="prospectusOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:2000; align-items:center; justify-content:center;">
+        <div style="background:#fff; width:95%; max-width:1200px; height:90%; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.25); display:flex; flex-direction:column; overflow:hidden;">
+            <div style="padding:10px 16px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; justify-content:space-between;">
+                <h3 style="margin:0; font-size:1rem; color:#111827;">Student Prospectus (Registrar View)</h3>
+                <button type="button" onclick="closeProspectusModal()" style="border:none; background:transparent; font-size:1.25rem; cursor:pointer; line-height:1;">&times;</button>
+            </div>
+            <iframe id="prospectusFrame" src="" style="border:0; width:100%; flex:1; background:#f3f4f6;"></iframe>
+        </div>
+    </div>
+
+    <!-- Tabulator JS -->
+    <script src="https://unpkg.com/tabulator-tables@5.5.0/dist/js/tabulator.min.js"></script>
+
     <script>
+        // Expose PHP data to JS for Tabulator
+        const studentsData = <?php echo json_encode($students_data, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?> || [];
+        let studentsTable = null;
+
         function searchStudents() {
             const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-            const rows = document.querySelectorAll('.students-table tbody tr');
-            
-            rows.forEach(row => {
-                const text = row.textContent.toLowerCase();
-                const shouldShow = text.includes(searchTerm) || searchTerm === '';
-                row.style.display = shouldShow ? '' : 'none';
-            });
+            if (!studentsTable) return;
+
+            if (!searchTerm) {
+                studentsTable.clearFilter();
+                return;
+            }
+
+            studentsTable.setFilter(function (data, params) {
+                const t = params.term;
+                if (!t) return true;
+                const rowText = [
+                    data.student_id,
+                    data.student_name,
+                    data.email,
+                    data.programs,
+                    data.academic_year,
+                    data.semester,
+                    data.classification,
+                    data.gender,
+                    data.fiscal_year,
+                ].map(v => (v || '').toString().toLowerCase()).join(' ');
+                return rowText.includes(t);
+            }, { term: searchTerm });
         }
         
         // Add search on Enter key
@@ -319,7 +334,102 @@ $students_result = $conn->query($students_query);
                 searchStudents();
             }
         });
+
+        // Download CSV function using Tabulator's built-in downloader
+        function downloadCSV() {
+            if (!studentsTable) return;
+            const filename = 'students_list_' + new Date().toISOString().slice(0, 10) + '.csv';
+            studentsTable.download('csv', filename);
+        }
+
+        // Open/close prospectus modal helpers
+        function openProspectusModal(url) {
+            const overlay = document.getElementById('prospectusOverlay');
+            const frame = document.getElementById('prospectusFrame');
+            if (!overlay || !frame) return;
+            frame.src = url;
+            overlay.style.display = 'flex';
+        }
+
+        function closeProspectusModal() {
+            const overlay = document.getElementById('prospectusOverlay');
+            const frame = document.getElementById('prospectusFrame');
+            if (!overlay || !frame) return;
+            frame.src = '';
+            overlay.style.display = 'none';
+        }
+
+        // Helper to open prospectus for a given Tabulator row data
+        function openProspectusForStudent(rowData) {
+            if (!rowData) return;
+            const classification = (rowData.classification || '').toLowerCase();
+            if (classification !== 'irregular') return; // Only irregular students
+
+            const studentId = rowData.student_id || '';
+            if (!studentId) return;
+
+            const program = rowData.programs || '';
+            const fiscalYear = rowData.fiscal_year || '';
+
+            const params = new URLSearchParams();
+            params.set('student_id', studentId);
+            if (program) params.set('program', program);
+            if (fiscalYear) params.set('fiscal_year', fiscalYear);
+            params.set('from_modal', '1');
+
+            const url = 'student_evaluation.php?' + params.toString();
+            openProspectusModal(url);
+        }
+
+        // Initialize Tabulator after DOM is ready
+        document.addEventListener('DOMContentLoaded', function () {
+            const tableEl = document.getElementById('studentsTabulator');
+            if (!tableEl) return;
+
+            studentsTable = new Tabulator(tableEl, {
+                data: studentsData,
+                layout: 'fitColumns',
+                pagination: 'local',
+                paginationSize: 25,
+                paginationSizeSelector: [25, 50, 100],
+                placeholder: 'No students found',
+                height: '600px',
+                columns: [
+                    { title: 'Student ID', field: 'student_id', headerFilter: 'input', minWidth: 130 },
+                    { title: 'Student Name', field: 'student_name', headerFilter: 'input', minWidth: 200 },
+                    { title: 'Email', field: 'email', headerFilter: 'input', minWidth: 200 },
+                    { title: 'Program', field: 'programs', headerFilter: 'input', minWidth: 150 },
+                    { title: 'Year Level', field: 'academic_year', hozAlign: 'center', width: 110 },
+                    { title: 'Semester', field: 'semester', hozAlign: 'center', width: 110 },
+                    { title: 'Classification', field: 'classification', minWidth: 120 },
+                    { title: 'Gender', field: 'gender', width: 100 },
+                    { title: 'Fiscal Year', field: 'fiscal_year', width: 130 },
+                    {
+                        title: 'Action',
+                        field: 'student_id',
+                        hozAlign: 'center',
+                        width: 140,
+                        headerSort: false,
+                        formatter: function (cell) {
+                            const data = cell.getRow().getData() || {};
+                            const classification = (data.classification || '').toLowerCase();
+                            const isIrregular = classification === 'irregular';
+                            const btnClass = isIrregular ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary disabled';
+                            const title = isIrregular ? 'View prospectus' : 'Prospectus available for irregular students only';
+                            return '<button type="button" class="' + btnClass + '" title="' + title + '"><i class="fas fa-book-open"></i> View</button>';
+                        },
+                        cellClick: function (e, cell) {
+                            const data = cell.getRow().getData() || {};
+                            openProspectusForStudent(data);
+                        }
+                    },
+                ],
+                rowClick: function (e, row) {
+                    const data = row.getData() || {};
+                    openProspectusForStudent(data);
+                },
+            });
+        });
     </script>
 </body>
-</html> 
- 
+</html>

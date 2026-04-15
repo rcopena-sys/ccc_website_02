@@ -61,6 +61,9 @@ $stmt->execute();
 $result = $stmt->get_result();
 $user = $result->fetch_assoc();
 
+// Normalize status for checks (DB uses 'Inactive' for archived accounts)
+$status = strtolower($user['status'] ?? '');
+
 // Check if account is locked
 if ($user && $user['account_locked_until'] && strtotime($user['account_locked_until']) > time()) {
     $remaining_time = strtotime($user['account_locked_until']) - time();
@@ -88,7 +91,13 @@ if (!$user) {
     header("Location: index.php"); exit();
 }
 
-if ($user['status'] !== 'Active') {
+// Block non-active accounts (treat Inactive as archived)
+if ($status === 'inactive') {
+    $_SESSION['toast_error'] = "Your account has been archived. Please contact the administrator.";
+    header("Location: index.php"); exit();
+}
+
+if ($status !== 'active') {
     $_SESSION['toast_error'] = "Your account is inactive. Please contact the administrator.";
     header("Location: index.php"); exit();
 }

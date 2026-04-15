@@ -1015,12 +1015,32 @@ $json_table = json_encode($table_array);
                                 Show Archived Users
                             </button>
                         </div>
-                        <p style="color: #64748b; margin: 0;">View and manage all system users</p>
+                        <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px;">
+                            <button type="button" id="filter-all" class="btn btn-primary btn-sm">All Accounts</button>
+                            <button type="button" id="filter-staff" class="btn btn-outline-primary btn-sm">Staff Accounts</button>
+                            <button type="button" id="filter-student" class="btn btn-outline-primary btn-sm">Student Accounts</button>
+                        </div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;">
+                            <select id="filter-role" class="form-select form-select-sm" style="width: 150px; border-radius: 8px; border: 1px solid rgba(66, 133, 244, 0.3);">
+                                <option value="">All Roles</option>
+                                <option value="Admin">Super Admin</option>
+                                <option value="Dean">Dean</option>
+                                <option value="Registrar">Registrar</option>
+                                <option value="BSIT">BSIT Student</option>
+                                <option value="BSCS">BSCS Student</option>
+                            </select>
+                            <select id="filter-status" class="form-select form-select-sm" style="width: 150px; border-radius: 8px; border: 1px solid rgba(66, 133, 244, 0.3);">
+                                <option value="">All Status</option>
+                                <option value="Active">Active</option>
+                                <option value="Archived">Archived</option>
+                            </select>
+                            <button type="button" id="clear-filters" class="btn btn-outline-secondary btn-sm">
+                                <i class="fas fa-times"></i> Clear Filters
+                            </button>
+                        </div>
+                        <p style="color: #64748b; margin: 10px 0 0 0;">View and manage staff and student accounts separately</p>
                     </div>
-                    <div style="position: relative; width: 300px;">
-                        <i class="fas fa-search" style="position: absolute; left: 15px; top: 12px; color: #adb5bd;"></i>
-                        <input type="text" id="search-input" class="form-control" placeholder="Search users..." style="padding-left: 40px; border-radius: 8px; border: 1px solid rgba(66, 133, 244, 0.2); height: 42px; color: #1e3a5f;">
-                    </div>
+                    <!-- Search bar removed -->
                 </div>
                 
                 <div style="background: white; border-radius: 15px; overflow: hidden;">
@@ -1050,13 +1070,15 @@ $json_table = json_encode($table_array);
                                         // Default status to 'Active' if empty
                                         $status = !empty($row['status']) ? trim($row['status']) : 'Active';
                                         
-                                        // Set status class based on status value
+                                        // Set status class based on status value (DB uses 'Inactive' for archived accounts)
                                         if ($status == 'Active') {
                                             $statusClass = 'text-success';
-                                        } elseif ($status == 'Archived') {
-                                            $statusClass = 'text-warning';
                                         } elseif ($status == 'Inactive') {
-                                            $statusClass = 'text-danger';
+                                            // Show archived accounts as warning (orange)
+                                            $statusClass = 'text-warning';
+                                        } elseif ($status == 'Archived') {
+                                            // Fallback if any legacy rows still use 'Archived'
+                                            $statusClass = 'text-warning';
                                         } else {
                                             $statusClass = 'text-secondary'; // For any other status
                                         }
@@ -1065,7 +1087,9 @@ $json_table = json_encode($table_array);
                                         $fullName = htmlspecialchars(($row['firstname'] ?? '') . ' ' . ($row['lastname'] ?? ''), ENT_QUOTES);
                                         $email = htmlspecialchars($row['email'] ?? '', ENT_QUOTES);
                                         $roleName = htmlspecialchars($row['role_name'] ?? '', ENT_QUOTES);
-                                        $statusDisplay = htmlspecialchars($status ?? '', ENT_QUOTES);
+                                        // In UI, show 'Archived' when DB status is 'Inactive'
+                                        $statusDisplayRaw = ($status === 'Inactive') ? 'Archived' : $status;
+                                        $statusDisplay = htmlspecialchars($statusDisplayRaw ?? '', ENT_QUOTES);
                                         $classification = htmlspecialchars($row['classification'] ?? '', ENT_QUOTES);
                                                 
                                                 // Show classification as plain text (no dropdown)
@@ -1088,16 +1112,14 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
     // Edit button
     "            <button type='button' class='btn btn-action btn-edit' title='Edit User' data-id='" . $userId . "' data-name='" . $fullName . "' data-email='" . $email . "' data-status='" . $statusDisplay . "' onclick='openSimpleEditModal(" . $userId . ", \"" . $fullName . "\", \"" . $email . "\", \"" . $statusDisplay . "\")'>\n" .
     "                <i class='fas fa-edit'></i>\n" .
-    "            </button>\n" .
-    // Archive or restore button depending on status
-    (($status === 'Archived' || $status === 'Inactive')
-        ? "            <button type='button' class='btn btn-action btn-restore' title='Restore User' data-id='" . $userId . "' onclick='quickRestoreUser(" . $userId . ")'>\n" .
-          "                <i class='fas fa-undo'></i>\n" .
-          "            </button>\n"
-        : "            <button type='button' class='btn btn-action btn-archive' title='Archive User' data-id='" . $userId . "' onclick='quickArchiveUser(" . $userId . ")'>\n" .
-          "                <i class='fas fa-archive'></i>\n" .
-          "            </button>\n"
-    ) .
+        "            </button>\n" .
+        // Restore button only when user is archived/inactive (no archive button for active users)
+        (($status === 'Archived' || $status === 'Inactive')
+                ? "            <button type='button' class='btn btn-action btn-restore' title='Restore User' data-id='" . $userId . "' onclick='quickRestoreUser(" . $userId . ")'>\n" .
+                    "                <i class='fas fa-undo'></i>\n" .
+                    "            </button>\n"
+                : ""
+        ) .
     "        </div>\n" .
     "    </td>\n" .
     "</tr>";
@@ -1137,13 +1159,8 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
                             <label class="form-label">Status</label>
                             <select class="form-select" id="simpleUserStatus">
                                 <option value="Active">Active</option>
-                                <option value="Inactive">archive</option>
+                                <option value="Inactive">Archived</option>
                             </select>
-                        </div>
-                        <div class="mb-3">
-                            <button type="button" class="btn btn-danger w-100" onclick="deleteUserFromModal()">
-                                <i class="fas fa-trash me-2"></i> Delete User 
-                            </button>
                         </div>
                     </form>
                 </div>
@@ -1403,32 +1420,193 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
     };
     </script>
 
-    <!-- Toggle archived users button logic -->
+    <!-- Toggle archived users and account-type filter logic (now using DataTables) -->
     <script>
     document.addEventListener('DOMContentLoaded', function() {
         const toggleBtn = document.getElementById('toggle-archived-btn');
-        if (!toggleBtn) return;
+        const filterAllBtn = document.getElementById('filter-all');
+        const filterStaffBtn = document.getElementById('filter-staff');
+        const filterStudentBtn = document.getElementById('filter-student');
+
+        const roleFilter = document.getElementById('filter-role');
+        const statusFilter = document.getElementById('filter-status');
+        const clearFiltersBtn = document.getElementById('clear-filters');
+
+        // Initialize DataTable for the user table
+        const $userTable = $('#userTable');
+        if (!$userTable.length) {
+            return;
+        }
+
+        const dataTable = $userTable.DataTable({
+            pageLength: 10,
+            lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, 'All']],
+            order: [], // keep server-side ordering
+            language: {
+                search: 'Search:',
+                lengthMenu: 'Show _MENU_ entries',
+                info: 'Showing _START_ to _END_ of _TOTAL_ entries'
+            }
+        });
+
+        // Expose globally for other scripts (e.g., custom search)
+        window.userDataTable = dataTable;
 
         let showArchivedOnly = false;
+        let accountFilter = 'all'; // 'all' | 'staff' | 'student'
+        let selectedRole = '';
+        let selectedStatus = '';
 
-        toggleBtn.addEventListener('click', function() {
-            showArchivedOnly = !showArchivedOnly;
+        // Combined filter using DataTables custom search
+        $.fn.dataTable.ext.search.push(function(settings, data) {
+            if (settings.nTable !== $userTable[0]) {
+                return true;
+            }
 
-            const rows = document.querySelectorAll('#userTable tbody tr');
-            rows.forEach(function(row) {
-                const statusCell = row.querySelector('td:nth-child(5) span');
-                const statusText = statusCell ? statusCell.textContent.trim() : '';
-                const isArchived = (statusText === 'Archived' || statusText === 'Inactive');
+            const roleText = (data[3] || '').trim();
+            const statusText = (data[4] || '').trim();
+            const roleLower = roleText.toLowerCase();
 
-                if (showArchivedOnly) {
-                    row.style.display = isArchived ? '' : 'none';
+            const isStudent = roleLower.includes('student') || roleLower === 'bsit' || roleLower === 'bscs';
+            const isArchived = (statusText === 'Archived' || statusText === 'Inactive');
+
+            let visible = true;
+
+            // Archived-only toggle
+            if (showArchivedOnly && !isArchived) {
+                visible = false;
+            }
+
+            // Account type filter
+            if (accountFilter === 'student' && !isStudent) {
+                visible = false;
+            } else if (accountFilter === 'staff' && isStudent) {
+                visible = false;
+            }
+
+            // Role dropdown filter (map select values to displayed role text)
+            if (selectedRole && visible) {
+                switch (selectedRole) {
+                    case 'Admin':
+                        if (roleText !== 'Super Admin') visible = false;
+                        break;
+                    case 'Dean':
+                        if (roleText !== 'Dean') visible = false;
+                        break;
+                    case 'Registrar':
+                        if (roleText !== 'Registrar') visible = false;
+                        break;
+                    case 'BSIT':
+                        if (roleText !== 'BSIT Student') visible = false;
+                        break;
+                    case 'BSCS':
+                        if (roleText !== 'BSCS Student') visible = false;
+                        break;
+                }
+            }
+
+            // Status dropdown filter
+            if (selectedStatus && visible) {
+                if (selectedStatus === 'Active' && statusText !== 'Active') {
+                    visible = false;
+                } else if (selectedStatus === 'Archived' && statusText !== 'Archived') {
+                    visible = false;
+                }
+            }
+
+            return visible;
+        });
+
+        function applyAllFilters() {
+            dataTable.draw();
+        }
+
+        function setActiveFilterButton(activeBtn) {
+            [filterAllBtn, filterStaffBtn, filterStudentBtn].forEach(function(btn) {
+                if (!btn) return;
+                if (btn === activeBtn) {
+                    btn.classList.remove('btn-outline-primary');
+                    btn.classList.add('btn-primary');
                 } else {
-                    row.style.display = '';
+                    btn.classList.remove('btn-primary');
+                    btn.classList.add('btn-outline-primary');
                 }
             });
+        }
 
-            toggleBtn.textContent = showArchivedOnly ? 'Show All Users' : 'Show Archived Users';
-        });
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', function() {
+                showArchivedOnly = !showArchivedOnly;
+                toggleBtn.textContent = showArchivedOnly ? 'Show All Users' : 'Show Archived Users';
+                applyAllFilters();
+            });
+        }
+
+        if (filterAllBtn) {
+            filterAllBtn.addEventListener('click', function() {
+                accountFilter = 'all';
+                setActiveFilterButton(filterAllBtn);
+                applyAllFilters();
+            });
+        }
+
+        if (filterStaffBtn) {
+            filterStaffBtn.addEventListener('click', function() {
+                accountFilter = 'staff';
+                setActiveFilterButton(filterStaffBtn);
+                applyAllFilters();
+            });
+        }
+
+        if (filterStudentBtn) {
+            filterStudentBtn.addEventListener('click', function() {
+                accountFilter = 'student';
+                setActiveFilterButton(filterStudentBtn);
+                applyAllFilters();
+            });
+        }
+
+        if (roleFilter) {
+            roleFilter.addEventListener('change', function() {
+                selectedRole = this.value;
+                applyAllFilters();
+            });
+        }
+
+        if (statusFilter) {
+            statusFilter.addEventListener('change', function() {
+                selectedStatus = this.value;
+                applyAllFilters();
+            });
+        }
+
+        if (clearFiltersBtn) {
+            clearFiltersBtn.addEventListener('click', function() {
+                selectedRole = '';
+                selectedStatus = '';
+                if (roleFilter) roleFilter.value = '';
+                if (statusFilter) statusFilter.value = '';
+
+                accountFilter = 'all';
+                setActiveFilterButton(filterAllBtn);
+
+                showArchivedOnly = false;
+                if (toggleBtn) toggleBtn.textContent = 'Show Archived Users';
+
+                // Clear custom search input if present
+                const searchInput = document.getElementById('search-input');
+                if (searchInput) searchInput.value = '';
+
+                // Clear DataTables global search
+                dataTable.search('');
+
+                applyAllFilters();
+            });
+        }
+
+        // Initial state
+        setActiveFilterButton(filterAllBtn);
+        applyAllFilters();
     });
     </script>
 
@@ -1437,6 +1615,10 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
     document.addEventListener('DOMContentLoaded', function() {
         const editForm = document.getElementById('editUserForm');
         const saveBtn = document.getElementById('saveChangesBtn');
+        
+        // Exit if elements don't exist
+        if (!editForm || !saveBtn) return;
+        
         const spinner = saveBtn.querySelector('.spinner-border');
         
         editForm.addEventListener('submit', function(e) {
@@ -1444,7 +1626,7 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
             
             // Show loading state
             saveBtn.disabled = true;
-            spinner.classList.remove('d-none');
+            if (spinner) spinner.classList.remove('d-none');
             
             // Get form data
             const formData = new FormData(editForm);
@@ -1701,6 +1883,59 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
         });
     };
 
+    // Ensure quickArchiveUser is globally available for inline onclick handlers
+    window.quickArchiveUser = function(userId) {
+        Swal.fire({
+            title: 'Archive User?',
+            text: 'Archiving this user will prevent them from logging in.',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#ff9800',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: 'Yes, archive user!'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                fetch('archive_user.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `user_id=${userId}&csrf_token=<?php echo $_SESSION['csrf_token']; ?>`
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'User Archived',
+                            text: 'User has been archived successfully',
+                            timer: 2000,
+                            showConfirmButton: false
+                        }).then(() => {
+                            location.reload();
+                        });
+                    } else {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Error',
+                            text: data.message || 'Failed to set user inactive'
+                        });
+                    }
+                })
+                .catch(error => {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error',
+                        text: 'An error occurred: ' + error.message
+                    });
+                });
+            }
+        });
+    };
+
     (function() {
         console.log('Initializing table...');
         var total_record = 0;
@@ -1788,13 +2023,13 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
 
         window.quickArchiveUser = function(userId) {
             Swal.fire({
-                title: 'Set User Inactive?',
-                text: 'Setting this user to inactive will prevent them from logging in.',
+                title: 'Archive User?',
+                text: 'Archiving this user will prevent them from logging in.',
                 icon: 'warning',
                 showCancelButton: true,
                 confirmButtonColor: '#ff9800',
                 cancelButtonColor: '#6c757d',
-                confirmButtonText: 'Yes, set inactive!'
+                confirmButtonText: 'Yes, archive user!'
             }).then((result) => {
                 if (result.isConfirmed) {
                     fetch('archive_user.php', {
@@ -1812,8 +2047,8 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
                         if (data.success) {
                             Swal.fire({
                                 icon: 'success',
-                                title: 'User Set Inactive',
-                                text: 'User has been set to inactive successfully',
+                                title: 'User Archived',
+                                text: 'User has been archived successfully',
                                 timer: 2000,
                                 showConfirmButton: false
                             }).then(() => {
@@ -1957,6 +2192,102 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
                 }
             });
         }
+
+        // Initialize Tabulator table variable for search functionality
+        let table = null;
+        
+        let searchTimeout;
+
+        function applySearchFilter(rawValue) {
+            const value = (rawValue || '').toLowerCase();
+
+            // Apply filter to Tabulator table (if present)
+            if (table) {
+                if (value === '') {
+                    table.clearFilter();
+                } else {
+                    table.setFilter(function(data) {
+                        // Check all relevant fields for matches
+                        return (
+                            String(data.firstname || '').toLowerCase().includes(value) ||
+                            String(data.lastname || '').toLowerCase().includes(value) ||
+                            String(data.email || '').toLowerCase().includes(value) ||
+                            String(data.student_id || '').toLowerCase().includes(value) ||
+                            String(data.section || '').toLowerCase().includes(value) ||
+                            String(data.year_level || '').toLowerCase().includes(value)
+                        );
+                    });
+                }
+                updateEntryCounts();
+            }
+
+            // Also filter the visible HTML table rows (userTable)
+            const htmlTable = document.getElementById('userTable');
+            if (htmlTable) {
+                const rows = htmlTable.querySelectorAll('tbody tr');
+                rows.forEach(row => {
+                    if (!value) {
+                        // Show all rows when search is cleared
+                        row.style.display = '';
+                    } else {
+                        const rowText = row.textContent.toLowerCase();
+                        row.style.display = rowText.includes(value) ? '' : 'none';
+                    }
+                });
+            }
+        }
+
+        const searchInput = document.getElementById('search-input');
+        const searchButton = document.getElementById('search-button');
+        const nameColumnSearch = document.getElementById('name-column-search');
+
+        // Live search while typing in main search (debounced)
+        if (searchInput) {
+            searchInput.addEventListener('input', function(e) {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    applySearchFilter(e.target.value);
+                }, 300);
+            });
+
+            // Enter key triggers search immediately
+            searchInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    clearTimeout(searchTimeout);
+                    applySearchFilter(this.value);
+                }
+            });
+        }
+
+        // Click on Search button
+        if (searchButton) {
+            searchButton.addEventListener('click', function() {
+                if (!searchInput) return;
+                clearTimeout(searchTimeout);
+                applySearchFilter(searchInput.value);
+            });
+        }
+
+        // Live search in the Name column header (filter by first column only)
+        if (nameColumnSearch) {
+            nameColumnSearch.addEventListener('input', function(e) {
+                const value = (e.target.value || '').toLowerCase();
+                const htmlTable = document.getElementById('userTable');
+                if (!htmlTable) return;
+
+                const rows = htmlTable.querySelectorAll('tbody tr');
+                rows.forEach(row => {
+                    const nameCell = row.querySelector('td:first-child');
+                    const nameText = (nameCell ? nameCell.textContent : '').toLowerCase();
+                    if (!value) {
+                        row.style.display = '';
+                    } else {
+                        row.style.display = nameText.includes(value) ? '' : 'none';
+                    }
+                });
+            });
+        }
         
         })();
     
@@ -2035,7 +2366,7 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
     // Function to get role name from role_id
         function getRoleName(roleId) {
             const roleMap = {
-                1: {name: 'ADMIN', class: 'badge bg-danger'},
+                1: {name: 'Super Admin', class: 'badge bg-danger'},
                 2: {name: 'DEAN', class: 'badge bg-primary'},
                 3: {name: 'REGISTRAR', class: 'badge bg-info'},
                 4: {name: 'BSIT', class: 'badge bg-success'},
@@ -2087,19 +2418,22 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
             badge.textContent = status;
             return badge;
         };
-        
-        // Initialize Tabulator
-        const table = new Tabulator("#user-table", {
-            data: table_data,
-            layout: "fitDataFill",
-            height: "calc(100vh - 300px)",
-            printAsHtml: true,
-            pagination: "local",
-            paginationSize: 10,
-            paginationSizeSelector: [10, 20, 50, 100],
-            movableColumns: true,
-            responsiveLayout: "collapse",
-            columns: [
+
+        // Initialize Tabulator (only if container exists)
+        // Note: table variable already declared at top of IIFE
+        const tabulatorElement = document.getElementById('user-table');
+        if (tabulatorElement) {
+            table = new Tabulator("#user-table", {
+                data: table_data,
+                layout: "fitDataFill",
+                height: "calc(100vh - 300px)",
+                printAsHtml: true,
+                pagination: "local",
+                paginationSize: 10,
+                paginationSizeSelector: [10, 20, 50, 100],
+                movableColumns: true,
+                responsiveLayout: "collapse",
+                columns: [
                 {
                     title: "ID",
                     field: "id",
@@ -2142,7 +2476,7 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
                 hozAlign: "center",
                 headerFilter: "select",
                 headerFilterParams: {
-                    "1": "Admin",
+                    "1": "Super Admin",
                     "2": "Dean",
                     "3": "Registrar",
                     "4": "BSIT",
@@ -2185,22 +2519,18 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
                     editBtn.title = "Edit User";
                     editBtn.innerHTML = '<i class="fas fa-edit"></i>';
                     
-                    // Archive/Restore button
-                    const actionBtn = document.createElement("button");
-                    actionBtn.type = "button";
+                    // Restore button (only for archived/inactive users; no archive button for active users)
                     if (isInactive) {
+                        const actionBtn = document.createElement("button");
+                        actionBtn.type = "button";
                         actionBtn.className = "btn btn-action btn-restore";
                         actionBtn.setAttribute("data-action", "restore");
                         actionBtn.title = "Restore User";
                         actionBtn.innerHTML = '<i class="fas fa-undo"></i>';
-                    } else {
-                        actionBtn.className = "btn btn-action btn-archive";
-                        actionBtn.setAttribute("data-action", "archive");
-                        actionBtn.title = "Set User Inactive";
-                        actionBtn.innerHTML = '<i class="fas fa-archive"></i>';
+                        actionBtn.setAttribute("data-user-id", data.id);
+                        container.appendChild(actionBtn);
                     }
-                    actionBtn.setAttribute("data-user-id", data.id);
-                    
+
                     // Delete button
                     const deleteBtn = document.createElement("button");
                     deleteBtn.type = "button";
@@ -2211,7 +2541,6 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
                     deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
                     
                     container.appendChild(editBtn);
-                    container.appendChild(actionBtn);
                     container.appendChild(deleteBtn);
                     
                     console.log('Created container with buttons:', container);
@@ -2320,20 +2649,37 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
                 updateEntryCounts();
             },
         });
+        }
         
         // Function to update showing/total entry counts
         function updateEntryCounts() {
-            const showing = table.getDataCount("active");
-            const total = table.getDataCount();
-            document.getElementById('showing-count').textContent = showing;
-            document.getElementById('total-count').textContent = total;
+            // Prefer DataTables counts when available
+            if (window.userDataTable) {
+                const total = window.userDataTable.rows().count();
+                const showing = window.userDataTable.rows({ filter: 'applied' }).count();
+                const showingEl = document.getElementById('showing-count');
+                const totalEl = document.getElementById('total-count');
+                if (showingEl) showingEl.textContent = showing;
+                if (totalEl) totalEl.textContent = total;
+            } else if (table) {
+                const showing = table.getDataCount("active");
+                const total = table.getDataCount();
+                document.getElementById('showing-count').textContent = showing;
+                document.getElementById('total-count').textContent = total;
+            } else {
+                const htmlTable = document.getElementById('userTable');
+                if (htmlTable) {
+                    const rows = Array.from(htmlTable.querySelectorAll('tbody tr'));
+                    const visibleRows = rows.filter(row => row.style.display !== 'none');
+                    const showingEl = document.getElementById('showing-count');
+                    const totalEl = document.getElementById('total-count');
+                    if (showingEl) showingEl.textContent = visibleRows.length;
+                    if (totalEl) totalEl.textContent = rows.length;
+                }
+            }
         }
         
-        // Update counts when data is loaded or filtered
-        table.on("dataLoaded", updateEntryCounts);
-        table.on("dataFiltered", updateEntryCounts);
-        
-        // Initialize counts
+        // Initialize counts once
         updateEntryCounts();
         
         // Simplified event delegation - remove conflicts with onclick attributes
@@ -2348,71 +2694,126 @@ echo "<tr class='user-row' data-id='" . $userId . "' style='border-bottom: 1px s
             console.log('Button clicked:', target.className);
         });
         
-        // Search functionality
-        document.getElementById('search-input')?.addEventListener('input', function(e) {
-            clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(() => {
-                const value = e.target.value.toLowerCase();
+        // Search functionality (input + button)
+        let searchTimeout;
+
+        function applySearchFilter(rawValue) {
+            const value = (rawValue || '').toLowerCase();
+
+            // Use DataTables global search when available
+            if (window.userDataTable) {
+                window.userDataTable.search(value).draw();
+                updateEntryCounts();
+                return;
+            }
+
+            // Fallbacks for legacy Tabulator/HTML behaviour
+            if (table) {
                 if (value === '') {
                     table.clearFilter();
-                    return;
+                } else {
+                    table.setFilter(function(data) {
+                        return (
+                            String(data.firstname || '').toLowerCase().includes(value) ||
+                            String(data.lastname || '').toLowerCase().includes(value) ||
+                            String(data.email || '').toLowerCase().includes(value) ||
+                            String(data.student_id || '').toLowerCase().includes(value) ||
+                            String(data.section || '').toLowerCase().includes(value) ||
+                            String(data.year_level || '').toLowerCase().includes(value)
+                        );
+                    });
                 }
-                
-                table.setFilter(function(data) {
-                    // Check all relevant fields for matches
-                    return (
-                        String(data.firstname || '').toLowerCase().includes(value) ||
-                        String(data.lastname || '').toLowerCase().includes(value) ||
-                        String(data.email || '').toLowerCase().includes(value) ||
-                        String(data.student_id || '').toLowerCase().includes(value) ||
-                        String(data.section || '').toLowerCase().includes(value) ||
-                        String(data.year_level || '').toLowerCase().includes(value)
-                    );
-                });
                 updateEntryCounts();
-            }, 300);
-        });
+            }
 
-        // Add download button handlers
-        const downloadCsv = document.getElementById('download-csv');
-        const downloadJson = document.getElementById('download-json');
-        const downloadXlsx = document.getElementById('download-xlsx');
-        const printTable = document.getElementById('print-table');
-        
-        if (downloadCsv) {
-            downloadCsv.addEventListener('click', function() {
-                table.download("csv", "list_" + getFormattedTime() + ".csv", {
-                    bom: true
+            const htmlTable = document.getElementById('userTable');
+            if (htmlTable) {
+                const rows = htmlTable.querySelectorAll('tbody tr');
+                rows.forEach(row => {
+                    if (!value) {
+                        row.style.display = '';
+                    } else {
+                        const rowText = row.textContent.toLowerCase();
+                        row.style.display = rowText.includes(value) ? '' : 'none';
+                    }
                 });
+            }
+        }
+
+        const searchInput = document.getElementById('search-input');
+        const searchButton = document.getElementById('search-button');
+
+        // Live search while typing (debounced)
+        if (searchInput) {
+            searchInput.addEventListener('input', function(e) {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    applySearchFilter(e.target.value);
+                }, 300);
+            });
+
+            // Enter key triggers search immediately
+            searchInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    clearTimeout(searchTimeout);
+                    applySearchFilter(this.value);
+                }
+            });
+        }
+
+        // Click on Search button
+        if (searchButton) {
+            searchButton.addEventListener('click', function() {
+                if (!searchInput) return;
+                clearTimeout(searchTimeout);
+                applySearchFilter(searchInput.value);
             });
         }
 
         if (downloadJson) {
             downloadJson.addEventListener('click', function() {
+                if (!table) return;
                 table.download("json", "users_" + new Date().toISOString().slice(0, 10) + ".json");
             });
         }
         
         if (downloadXlsx) {
             downloadXlsx.addEventListener('click', function() {
+                if (!table) return;
                 table.download("xlsx", "users_" + new Date().toISOString().slice(0, 10) + ".xlsx");
             });
         }
         
-        // Helper function to update record counts
+        // Helper function to update record counts (prefer DataTables when available)
         function updateRecordCounts() {
-            const total = table.getDataCount();
-            const filtered = table.getDataCount('active');
-            document.getElementById('total-count').textContent = total;
-            document.getElementById('showing-count').textContent = filtered;
+            if (window.userDataTable) {
+                const total = window.userDataTable.rows().count();
+                const filtered = window.userDataTable.rows({ filter: 'applied' }).count();
+                const totalEl = document.getElementById('total-count');
+                const showingEl = document.getElementById('showing-count');
+                if (totalEl) totalEl.textContent = total;
+                if (showingEl) showingEl.textContent = filtered;
+            } else if (table) {
+                const total = table.getDataCount();
+                const filtered = table.getDataCount('active');
+                document.getElementById('total-count').textContent = total;
+                document.getElementById('showing-count').textContent = filtered;
+            } else {
+                const htmlTable = document.getElementById('userTable');
+                if (htmlTable) {
+                    const rows = Array.from(htmlTable.querySelectorAll('tbody tr'));
+                    const visibleRows = rows.filter(row => row.style.display !== 'none');
+                    const totalEl = document.getElementById('total-count');
+                    const showingEl = document.getElementById('showing-count');
+                    if (totalEl) totalEl.textContent = rows.length;
+                    if (showingEl) showingEl.textContent = visibleRows.length;
+                }
+            }
         }
         
         // Initialize counts
         updateRecordCounts();
-        
-        // Update counts when data changes
-        table.on('dataProcessed', updateRecordCounts);
-        table.on('dataFiltered', updateRecordCounts);
         
 
         // Event delegation for edit/delete buttons - REMOVED (consolidated above)
@@ -2550,7 +2951,7 @@ $(document).ready(function() {
     
     // Map role names to role IDs (adjust according to your roles table)
     const roleMap = {
-        'Administrator': '1',
+        'Super Admin': '1',
         'Dean': '2',
         'Registrar': '3',
         'BSIT Student': '4',
@@ -3054,13 +3455,13 @@ function archiveUser() {
     const userId = document.getElementById('editUserId').value;
     
     Swal.fire({
-        title: 'Set User Inactive?',
-        text: 'Setting this user to inactive will prevent them from logging in.',
+        title: 'Archive User?',
+        text: 'Archiving this user will prevent them from logging in.',
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#ff9800',
         cancelButtonColor: '#6c757d',
-        confirmButtonText: 'Yes, set inactive!'
+        confirmButtonText: 'Yes, archive user!'
     }).then((result) => {
         if (result.isConfirmed) {
             fetch('archive_user.php', {
@@ -3073,8 +3474,8 @@ function archiveUser() {
                 if (data.success) {
                     Swal.fire({
                         icon: 'success',
-                        title: 'User Set Inactive',
-                        text: 'User has been set to inactive successfully',
+                        title: 'User Archived',
+                        text: 'User has been archived successfully',
                         timer: 2000,
                         showConfirmButton: false
                     }).then(() => {
@@ -3210,6 +3611,32 @@ function showEditMessage(message, type) {
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>`;
 }
+</script>
+
+<script>
+// Dedicated Name column search (filters only by first column of #userTable)
+(function() {
+    const nameSearchInput = document.getElementById('name-column-search');
+    const htmlTable = document.getElementById('userTable');
+
+    if (!nameSearchInput || !htmlTable) return;
+
+    nameSearchInput.addEventListener('input', function(e) {
+        const value = (e.target.value || '').toLowerCase();
+        const rows = htmlTable.querySelectorAll('tbody tr');
+
+        rows.forEach(row => {
+            const nameCell = row.querySelector('td:first-child');
+            const nameText = (nameCell ? nameCell.textContent : '').toLowerCase();
+
+            if (!value) {
+                row.style.display = '';
+            } else {
+                row.style.display = nameText.includes(value) ? '' : 'none';
+            }
+        });
+    });
+})();
 </script>
 
 </html>

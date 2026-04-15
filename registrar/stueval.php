@@ -204,38 +204,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         // Update classification in signin_db
         $stmt = $conn->prepare("UPDATE signin_db SET classification = ? WHERE student_id = ?");
         if (!$stmt) {
-            throw new Exception('Failed to prepare update statement: ' . $conn->error);
+          throw new Exception('Failed to prepare update statement: ' . $conn->error);
         }
         
         $stmt->bind_param('ss', $classification, $student_id);
         
         if ($stmt->execute()) {
-            if ($stmt->affected_rows > 0) {
-                echo json_encode([
-                    'success' => true,
-                    'message' => 'Classification updated successfully!',
-                    'classification' => $classification
-                ]);
-            } else {
-                // Check if student exists
-                $checkStmt = $conn->prepare("SELECT student_id FROM signin_db WHERE student_id = ?");
-                $checkStmt->bind_param('s', $student_id);
-                $checkStmt->execute();
-                $exists = $checkStmt->get_result()->num_rows > 0;
-                $checkStmt->close();
-                
-                if ($exists) {
-                    echo json_encode([
-                        'success' => true,
-                        'message' => 'Classification already set to this value.',
-                        'classification' => $classification
-                    ]);
-                } else {
-                    throw new Exception('Student not found in signin_db');
-                }
+          // Also mirror classification into students_db when the column exists
+          if (columnExists($conn, 'students_db', 'classification')) {
+            $stuStmt = $conn->prepare("UPDATE students_db SET classification = ? WHERE student_id = ?");
+            if ($stuStmt) {
+              $stuStmt->bind_param('ss', $classification, $student_id);
+              $stuStmt->execute();
+              $stuStmt->close();
             }
+          }
+
+          if ($stmt->affected_rows > 0) {
+            echo json_encode([
+              'success' => true,
+              'message' => 'Classification updated successfully!',
+              'classification' => $classification
+            ]);
+          } else {
+            // Check if student exists
+            $checkStmt = $conn->prepare("SELECT student_id FROM signin_db WHERE student_id = ?");
+            $checkStmt->bind_param('s', $student_id);
+            $checkStmt->execute();
+            $exists = $checkStmt->get_result()->num_rows > 0;
+            $checkStmt->close();
+                
+            if ($exists) {
+              echo json_encode([
+                'success' => true,
+                'message' => 'Classification already set to this value.',
+                'classification' => $classification
+              ]);
+            } else {
+              throw new Exception('Student not found in signin_db');
+            }
+          }
         } else {
-            throw new Exception('Failed to update classification: ' . $stmt->error);
+          throw new Exception('Failed to update classification: ' . $stmt->error);
         }
         $stmt->close();
         

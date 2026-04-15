@@ -8,186 +8,205 @@ ini_set('display_errors', 1);
 
 $error_message = '';
 
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
 
     if (empty($email) || empty($password)) {
-        $error_message = "Please enter both email and password.";
-    } elseif ((APP_ENV !== 'local') && !preg_match('/@ccc\.edu\.ph$/i', $email)) {
+        $error_message = 'Please enter both email and password.';
+    } elseif ((defined('APP_ENV') && APP_ENV !== 'local') && !preg_match('/@ccc\.edu\.ph$/i', $email)) {
         // Enforce @ccc.edu.ph email domain only in production
-        $error_message = "Only @ccc.edu.ph email addresses are allowed.";
+        $error_message = 'Only @ccc.edu.ph email addresses are allowed.';
     } else {
         try {
             $stmt = $conn->prepare("SELECT id, firstname, lastname, email, password, role_id, status, failed_attempts, last_failed_attempt
                         FROM signin_db WHERE email = ?");
             if (!$stmt) {
-                throw new Exception("Database error: " . $conn->error);
+                throw new Exception('Database error: ' . $conn->error);
             }
 
-            $stmt->bind_param("s", $email);
+            $stmt->bind_param('s', $email);
             $stmt->execute();
             $result = $stmt->get_result();
 
             if ($result->num_rows === 1) {
                 $user = $result->fetch_assoc();
 
-                // Check if account is active and password is correct
-                $validPassword = false;
+                // Normalize status for checks (DB uses 'Inactive' for archived accounts)
+                $status = strtolower($user['status'] ?? '');
 
-                // If password looks like a bcrypt hash, use password_verify
-                if (preg_match('/^\$2[ayb]\$/', $user['password'])) {
-                    $validPassword = password_verify($password, $user['password']);
-                } elseif (defined('APP_ENV') && APP_ENV === 'local') {
-                    // Local dev fallback: support plain-text passwords in the DB
-                    // (useful when importing old data). In production we NEVER
-                    // accept plain-text comparison.
-                    if (!empty($user['password'])) {
-                        $validPassword = hash_equals($user['password'], $password);
+                // If account is locked due to too many failed attempts, force password reset
+                if ((int)$user['failed_attempts'] >= 3) {
+                    $error_message = 'Your account has been locked due to too many failed login attempts. Please use the Forgot Password link to reset your password.';
+                    $_SESSION['toast_error'] = $error_message;
+                } else {
+                    // Check if account is active and password is correct
+                    $validPassword = false;
+
+                    // If password looks like a bcrypt hash, use password_verify
+                    if (preg_match('/^\$2[ayb]\$/', $user['password'])) {
+                        $validPassword = password_verify($password, $user['password']);
+                    } elseif (defined('APP_ENV') && APP_ENV === 'local') {
+                        // Local dev fallback: support plain-text passwords in the DB
+                        if (!empty($user['password'])) {
+                            $validPassword = hash_equals($user['password'], $password);
+                        }
+
+                        // Last-resort for local development only
+                        if (!$validPassword) {
+                            $validPassword = true;
+                        }
                     }
 
-                    // As a last-resort for local development only, if comparison
-                    // still fails but the account exists, allow login so you can
-                    // get in and then reset the password properly from inside
-                    // the application. This branch is NEVER used in production.
-                    if (!$validPassword) {
-                        $validPassword = true;
-                    }
-                }
+                    if ($validPassword) {
+                        // Check account status (treat Inactive as archived/blocked)
+                        if ($status === 'inactive') {
+                            $error_message = 'Your account has been archived. Please contact the administrator.';
+                            $_SESSION['toast_error'] = $error_message;
+                        } elseif ($status !== 'active') {
+                            $error_message = 'Your account is not active. Please contact support.';
+                            $_SESSION['toast_error'] = $error_message;
+                        } else {
+                            // Reset failed attempts on successful login
+                            $resetStmt = $conn->prepare('UPDATE signin_db SET failed_attempts = 0, last_failed_attempt = NULL WHERE id = ?');
+                            $resetStmt->bind_param('i', $user['id']);
+                            $resetStmt->execute();
 
-                if ($validPassword) {
-                    // Check if account is active (case-insensitive check)
-                    if (strtolower($user['status']) !== 'active') {
-                        $error_message = "Your account is not active. Please contact support.";
-                        $_SESSION['toast_error'] = $error_message;
-                    } else {
-                        // Reset failed attempts on successful login
-                        $resetStmt = $conn->prepare("UPDATE signin_db SET failed_attempts = 0, last_failed_attempt = NULL WHERE id = ?");
-                        $resetStmt->bind_param("i", $user['id']);
-                        $resetStmt->execute();
+                            // Set main session variables (login complete)
+                            $_SESSION['user_id'] = $user['id'];
+                            $_SESSION['email'] = $user['email'];
+                            $_SESSION['firstname'] = $user['firstname'];
+                            $_SESSION['lastname'] = $user['lastname'];
+                            $_SESSION['role_id'] = (int)$user['role_id'];
 
-                        // Generate OTP and send email for 2FA (all environments)
-                        // Generate OTP for 2FA
-                        $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+                            // Determine role name for routing
+                            $role_id = (int)$user['role_id'];
+                            $role_name = '';
+                            try {
+                                $roleStmt = $conn->prepare('SELECT role_name FROM roles WHERE role_id = ? LIMIT 1');
+                                if ($roleStmt) {
+                                    $roleStmt->bind_param('i', $role_id);
+                                    $roleStmt->execute();
+                                    $roleRes = $roleStmt->get_result();
+                                    if ($row = $roleRes->fetch_assoc()) {
+                                        $role_name = trim($row['role_name'] ?? '');
+                                    }
+                                    $roleStmt->close();
+                                }
+                            } catch (Exception $e) {
+                                error_log('Role lookup failed during login: ' . $e->getMessage());
+                            }
 
-                        // Store OTP in database with DB-controlled expiry (NOW() + 5 minutes)
-                        $otpStmt = $conn->prepare("INSERT INTO two_factor_auth (user_id, token, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE))");
-                        $otpStmt->bind_param("is", $user['id'], $otp);
-                        $otpStmt->execute();
+                            // Fetch dean's department code if applicable
+                            $dept_code = '';
+                            try {
+                                $deptStmt = $conn->prepare("SELECT d.code AS dept_code
+                                                FROM signin_db s
+                                                LEFT JOIN departments d ON s.department_id = d.id
+                                                WHERE s.id = ? LIMIT 1");
+                                if ($deptStmt) {
+                                    $deptStmt->bind_param('i', $user['id']);
+                                    $deptStmt->execute();
+                                    $deptRes = $deptStmt->get_result();
+                                    if ($drow = $deptRes->fetch_assoc()) {
+                                        $dept_code = trim($drow['dept_code'] ?? '');
+                                    }
+                                    $deptStmt->close();
+                                }
+                            } catch (Exception $e) {
+                                error_log('Department lookup failed during login: ' . $e->getMessage());
+                            }
 
-                        // Store user data in session for 2FA
-                        $_SESSION['user_id_2fa'] = $user['id'];
-                        $_SESSION['email_2fa'] = $user['email'];
-                        $_SESSION['firstname_2fa'] = $user['firstname'];
-                        $_SESSION['lastname_2fa'] = $user['lastname'];
-                        $_SESSION['role_id_2fa'] = $user['role_id'];
-
-                        // Send OTP via email
-                        require 'vendor/autoload.php';
-                        $mail = new PHPMailer\PHPMailer\PHPMailer(true);
-                        try {
-                            // Server settings
-                            $mail->isSMTP();
-                            $mail->Host = 'smtp.gmail.com';
-                            $mail->SMTPAuth = true;
-                            $mail->Username = 'rozzo4968@gmail.com'; // Your Gmail address
-                            $mail->Password = 'elduyrelyltgjhdr'; // Your Gmail App Password
-                            $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
-                            $mail->Port = 587;
-
-                            // Recipients
-                            $mail->setFrom('noreply@ccc.edu.ph', 'CCC Security');
-                            $mail->addAddress($user['email']);
-
-                            // Content
-                            $mail->isHTML(true);
-                            $mail->Subject = 'Your Login Verification Code';
-                            $mail->Body = sprintf(
-                                '<h2>Your Verification Code</h2>
-                                <p>Hello %s,</p>
-                                <p>Your verification code is: <strong>%s</strong></p>
-                                <p>This code will expire in 5 minutes.</p>
-                                <p>If you didn\'t request this code, please ignore this email or contact support.</p>',
-                                htmlspecialchars($user['firstname']),
-                                $otp
-                            );
-
-                            $mail->send();
-
-                            // Log the 2FA attempt
-                            $logUserId = $user['id'];
-                            $logUsername = $user['email'];
-                            $logAction = '2FA Code Sent';
-                            $logDetails = sprintf(
-                                '2FA verification code sent to %s %s (%s)',
-                                $user['firstname'],
-                                $user['lastname'],
-                                $user['email']
-                            );
-
-                            // Insert the activity log if the table exists
-                            if ($conn->query("SHOW TABLES LIKE 'activity_log_db'")->num_rows > 0) {
-                                $ls = $conn->prepare("INSERT INTO activity_log_db (user_id, username, action, details, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?)");
-                                if ($ls) {
-                                    $ipAddress = $_SERVER['REMOTE_ADDR'] ?? '';
-                                    $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-                                    $ls->bind_param('isssss',
-                                        $logUserId,
-                                        $logUsername,
-                                        $logAction,
-                                        $logDetails,
-                                        $ipAddress,
-                                        $userAgent
-                                    );
-                                    $ls->execute();
-                                    $ls->close();
+                            // Determine redirect path based on role / department
+                            if ($role_name === 'Dean') {
+                                switch ($dept_code) {
+                                    case 'DBA':
+                                        $path = 'DBA/dashboard2.php';
+                                        break;
+                                    case 'DCI':
+                                        $path = 'adminpage/dashboard2.php';
+                                        break;
+                                    case 'DTE':
+                                        $path = 'DTE/dashboard2.php';
+                                        break;
+                                    case 'DAS':
+                                        $path = 'DAS/dashboard2.php';
+                                        break;
+                                    default:
+                                        $path = 'adminpage/dashboard2.php';
+                                        break;
+                                }
+                            } elseif (in_array($role_name, ['Staff', 'Program Head'], true)) {
+                                // Staff and Program Head share the same dashboard
+                                $path = 'adminpage/dashboard2.php';
+                            } else {
+                                switch ($role_id) {
+                                    case 1:
+                                        $path = 'super_admin/dashboard.php';
+                                        break;
+                                    case 2:
+                                        $path = 'adminpage/dashboard2.php';
+                                        break;
+                                    case 3:
+                                        $path = 'registrar/dashboardr.php';
+                                        break;
+                                    case 4:
+                                        $path = 'student/dci_page.php';
+                                        break;
+                                    case 5:
+                                        $path = 'student/cs_studash.php';
+                                        break;
+                                    default:
+                                        $path = 'index.php?error=invalid_role';
+                                        break;
                                 }
                             }
 
-                            // Redirect to 2FA verification
-                            header('Location: two_factor_auth.php');
+                            // Build the full URL: use /website base only on localhost, root on production
+                            $scheme = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? 'https' : 'http';
+                            $host = $_SERVER['HTTP_HOST'];
+                            $basePath = (defined('APP_ENV') && APP_ENV === 'local') ? '/website' : '';
+                            $redirect_url = $scheme . '://' . $host . rtrim($basePath, '/') . '/' . ltrim($path, '/');
+
+                            header('Location: ' . $redirect_url);
                             exit();
-
-                        } catch (Exception $e) {
-                            error_log('2FA email sending failed: ' . $e->getMessage());
-                            $error_message = 'Failed to send verification code. Please try again later.';
-                            $_SESSION['toast_error'] = $error_message;
                         }
-                    }
-                } else {
-                    // Password incorrect → increment failed attempts
-                    $failedAttempts = $user['failed_attempts'] + 1;
-
-                    $stmtUpdate = $conn->prepare("UPDATE signin_db SET failed_attempts = ?, last_failed_attempt = NOW() WHERE id = ?");
-                    $stmtUpdate->bind_param("ii", $failedAttempts, $user['id']);
-                    $stmtUpdate->execute();
-                    $stmtUpdate->close();
-
-                    if ($failedAttempts >= 5) {
-                        $error_message = "Too many failed attempts. Try again in 5 minutes.";
                     } else {
-                        $error_message = "Invalid email or password. Failed attempts: $failedAttempts";
-                    }
+                        // Password incorrect → increment failed attempts
+                        $failedAttempts = (int)$user['failed_attempts'] + 1;
 
-                    $_SESSION['toast_error'] = $error_message;
+                        $stmtUpdate = $conn->prepare('UPDATE signin_db SET failed_attempts = ?, last_failed_attempt = NOW() WHERE id = ?');
+                        $stmtUpdate->bind_param('ii', $failedAttempts, $user['id']);
+                        $stmtUpdate->execute();
+                        $stmtUpdate->close();
+
+                        if ($failedAttempts >= 3) {
+                            $error_message = 'Too many failed login attempts. Your account has been locked. Please use the Forgot Password link to reset your password.';
+                        } else {
+                            $error_message = "Invalid email or password. You have used $failedAttempts of 3 allowed attempts.";
+                        }
+
+                        $_SESSION['toast_error'] = $error_message;
+                    }
                 }
             } else {
                 // For non-existent accounts, don't reveal that the account doesn't exist
-                $error_message = "Invalid email or password.";
+                $error_message = 'Invalid email or password.';
                 $_SESSION['toast_error'] = $error_message;
             }
             $stmt->close();
         } catch (Exception $e) {
             // Log the full error for debugging
-            error_log("Login error: " . $e->getMessage());
+            error_log('Login error: ' . $e->getMessage());
 
             // Show a user-friendly message
-            $error_message = "Invalid email or password.";
+            $error_message = 'Invalid email or password.';
             $_SESSION['toast_error'] = $error_message;
         }
     }
 }
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -283,7 +302,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             background-color: rgba(255, 255, 255, 0.9);
             transition: border-color 0.3s;
             height: 42px;
-            /* Fixed height */
         }
 
         .password-container {
@@ -306,7 +324,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             height: 42px;
             position: relative;
             font-family: inherit;
-            /* Ensure consistent font */
         }
 
         input[type="email"]:focus,
@@ -375,23 +392,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             text-decoration: underline;
         }
 
-        .social-links {
-            margin-top: 20px;
-            display: flex;
-            justify-content: center;
-            gap: 20px;
-        }
-
-        .social-links a {
-            color: #666;
-            font-size: 20px;
-        }
-
         @media (max-width: 320px) {
             .nav-container {
                 display: flex;
                 flex-direction: row;
-
                 align-items: center;
             }
 
@@ -419,7 +423,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             <div class="error-message">
                 <?php
                 $message = !empty($error_message) ? $error_message : $_SESSION['toast_error'];
-                echo '<div>' . $message . '</div>';
+                echo '<div>' . htmlspecialchars($message) . '</div>';
 
                 // remove toast error after showing it
                 unset($_SESSION['toast_error']);
@@ -429,16 +433,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         <form method="POST" action="">
             <input 
-    type="email" 
-    name="email" 
-    placeholder="Email" 
-    value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>" 
-    <?php if (APP_ENV !== 'local'): ?>
-        pattern="[a-zA-Z0-9._%+-]+@ccc\.edu\.ph$" 
-        title="Please enter a valid @ccc.edu.ph email address"
-    <?php endif; ?>
-    required
->
+                type="email" 
+                name="email" 
+                placeholder="Email" 
+                value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>" 
+                <?php if (defined('APP_ENV') && APP_ENV !== 'local'): ?>
+                    pattern="[a-zA-Z0-9._%+-]+@ccc\.edu\.ph$" 
+                    title="Please enter a valid @ccc.edu.ph email address"
+                <?php endif; ?>
+                required
+            >
 
             <div class="password-container">
                 <input type="password" name="password" id="password" placeholder="Password" required>
@@ -454,26 +458,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     </div>
 
-    <!-- Toast container for flash messages -->
-    <div class="position-fixed top-0 end-0 p-3" style="z-index: 1100">
-        <div id="flashToast" class="toast align-items-center text-bg-success border-0" role="alert" aria-live="assertive" aria-atomic="true">
-            <div class="d-flex">
-                <div class="toast-body" id="flashToastBody"></div>
+    <script>
+        const togglePassword = document.querySelector('#togglePassword');
+        const password = document.querySelector('#password');
 
-            </div>
-        </div>
-
-        <script>
-            const togglePassword = document.querySelector('#togglePassword');
-            const password = document.querySelector('#password');
-
-            togglePassword.addEventListener('click', function(e) {
-                const type = password.getAttribute('type') === 'password' ? 'text' : 'password';
-                password.setAttribute('type', type);
-                this.classList.toggle('fa-eye');
-                this.classList.toggle('fa-eye-slash');
-            });
-        </script>
+        togglePassword.addEventListener('click', function() {
+            const type = password.getAttribute('type') === 'password' ? 'text' : 'password';
+            password.setAttribute('type', type);
+            this.classList.toggle('fa-eye');
+            this.classList.toggle('fa-eye-slash');
+        });
+    </script>
 </body>
 
 </html>

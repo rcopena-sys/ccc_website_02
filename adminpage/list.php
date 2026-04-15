@@ -1,6 +1,38 @@
 <?php
 session_start();
 require_once __DIR__ . '/../db_connect.php';
+
+// Keep students_db.classification in sync with signin_db.classification (same as registrar view)
+$syncClassificationSql = "UPDATE students_db s
+    INNER JOIN signin_db si ON s.student_id = si.student_id
+    SET s.classification = si.classification
+    WHERE si.classification IS NOT NULL
+      AND (s.classification IS NULL OR s.classification <> si.classification)";
+$conn->query($syncClassificationSql);
+
+// Fetch students data for Tabulator (same structure as registrar/registrar.php)
+$students_query = "SELECT * FROM students_db ORDER BY student_name ASC";
+$students_result = $conn->query($students_query);
+
+$students_data = [];
+if ($students_result && $students_result->num_rows > 0) {
+    while ($student = $students_result->fetch_assoc()) {
+        $classification = isset($student['classification']) ? strtolower(trim($student['classification'])) : '';
+
+        $students_data[] = [
+            'student_id'    => $student['student_id'] ?? '',
+            'student_name'  => $student['student_name'] ?? '',
+            'email'         => $student['email'] ?? '',
+            'programs'      => $student['programs'] ?? '',
+            'academic_year' => $student['academic_year'] ?? '',
+            'semester'      => $student['semester'] ?? '',
+            'status'        => $student['status'] ?? '',
+            'gender'        => $student['gender'] ?? '',
+            'fiscal_year'   => $student['fiscal_year'] ?? '',
+            'classification'=> $classification,
+        ];
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -8,6 +40,10 @@ require_once __DIR__ . '/../db_connect.php';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Student List</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- Tabulator (Bootstrap 5 theme) -->
+    <link href="https://unpkg.com/tabulator-tables@5.5.0/dist/css/tabulator_bootstrap5.min.css" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
         body { background: white; }
@@ -55,27 +91,32 @@ require_once __DIR__ . '/../db_connect.php';
             max-height: calc(100vh - 40px);
             border: 2px solid purple;
             position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
         .search-bar {
-            margin-bottom: 30px;
+            margin-bottom: 10px;
             padding: 10px;
-            width: 250px;
+            width: 300px;
             border-radius: 10px;
             border: 1px solid #ddd;
         }
-        table {
+        .students-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
             width: 100%;
-            border-collapse: collapse;
-            background-color: white;
-            border-radius: 10px;
-            overflow: hidden;
+            max-width: 1200px;
+            padding: 24px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            margin-top: 10px;
         }
-        th, td {
-            padding: 8px;
-            border: 1px solid #ddd;
-            text-align: center;
+        #studentsTabulator {
+            width: 100%;
         }
-        th { background-color: #f2f2f2; }
         .watermark {
             position: absolute;
             top: 50%;
@@ -136,172 +177,31 @@ require_once __DIR__ . '/../db_connect.php';
     <div class="content">
         <div id="clock"></div>
         <div style="margin-bottom: 20px; display: flex; gap: 10px;">
-            
+            <button type="button" class="bulk-update-btn" onclick="downloadCSV()">Export CSV</button>
         </div>
         <img class="watermark" src="dci.png.png" alt="Watermark Logo" width="300">
-        <input type="text" id="searchInput" class="search-bar" placeholder="Search by name, ID, email, or course..." onkeyup="search()">
-        
-        <!-- Popup Modal -->
-        <div id="studentModal" class="modal">
-            <div class="modal-content">
-                <span class="close">&times;</span>
-                <h3 id="modalStudentName"></h3>
-                <p>ID: <span id="modalStudentId"></span></p>
-                <div class="modal-actions">
-                    <button onclick="addCurriculum()" class="add-curriculum-btn">Add Curriculum</button>
-                </div>
-            </div>
+
+        <div class="students-container">
+            <div id="studentsTabulator"></div>
         </div>
-        
-        <style>
-            /* Modal Styles */
-            .modal {
-                display: none;
-                position: fixed;
-                z-index: 1000;
-                left: 0;
-                top: 0;
-                width: 100%;
-                height: 100%;
-                background-color: rgba(0,0,0,0.5);
-            }
-            
-            .modal-content {
-                background-color: #fefefe;
-                margin: 15% auto;
-                padding: 20px;
-                border: 1px solid #888;
-                width: 40%;
-                border-radius: 8px;
-                box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-            }
-            
-            .close {
-                color: #aaa;
-                float: right;
-                font-size: 28px;
-                font-weight: bold;
-                cursor: pointer;
-            }
-            
-            .close:hover {
-                color: black;
-            }
-            
-            .modal-actions {
-                margin-top: 20px;
-                text-align: right;
-            }
-            
-            .add-curriculum-btn {
-                background-color: #4CAF50;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                font-size: 14px;
-            }
-            
-            .add-curriculum-btn:hover {
-                background-color: #45a049;
-            }
-            
-            .student-name {
-                color: #2563eb;
-                cursor: pointer;
-                text-decoration: underline;
-            }
-            
-            .student-name:hover {
-                color: #1d4ed8;
-            }
-        </style>
-        <?php
-
-        // Function to format student ID as YYYY-XXXXX
-        function formatStudentId($id) {
-            // If already in correct format, return as is
-            if (preg_match('/^\d{4}-\d{5}$/', $id)) {
-                return $id;
-            }
-            // If it's just numbers, add the dash after the first 4 digits
-            if (preg_match('/^(\d{4})(\d+)$/', $id, $matches)) {
-                return $matches[1] . '-' . $matches[2];
-            }
-            // If it's in a different format, try to extract numbers and format
-            preg_match_all('/\d+/', $id, $numbers);
-            if (!empty($numbers[0])) {
-                $digits = implode('', $numbers[0]);
-                if (strlen($digits) >= 9) { // At least 9 digits for YYYY-XXXXX
-                    return substr($digits, 0, 4) . '-' . substr($digits, 4, 5);
-                }
-            }
-            // If all else fails, return the original ID
-            return $id;
-        }
-
-        // Handle search
-        $search = isset($_GET['search']) ? $_GET['search'] : '';
-        $course = isset($_GET['course']) ? $_GET['course'] : '';
-
-        // Base query - using only students_db
-        $studentsWhere = [];
-        
-        // Add search condition if search term exists
-        if (!empty($search)) {
-            $sanitized_search = $conn->real_escape_string($search);
-            $studentsWhere[] = "(st.student_id LIKE '%$sanitized_search%' OR 
-                               st.student_name LIKE '%$sanitized_search%')";
-        }
-
-        // Add course filter if specified
-        if (!empty($course)) {
-            $sanitized_course = $conn->real_escape_string($course);
-            $studentsWhere[] = "st.programs = '$sanitized_course'";
-        }
-
-        $sql = "SELECT 
-                    st.student_name as firstname,
-                    '' as lastname,
-                    st.email as email,
-                    st.student_id,
-                    st.programs as course,
-                    st.classification,
-                    'Student' as role_name,
-                    st.curriculum,
-                
-                    st.fiscal_year,
-                    'students_db' as source_table
-                FROM students_db st" . 
-                (!empty($studentsWhere) ? " WHERE " . implode(' AND ', $studentsWhere) : "") . "
-                ORDER BY st.student_id, st.student_name";
-
-        $result = $conn->query($sql);
-        if ($result && $result->num_rows > 0) {
-            echo '<table>';
-            echo '<tr><th>Name</th><th>Email</th><th>Student ID</th><th>Course</th><th>Classification</th><th>Role</th><th>Curriculum</th></tr>';
-            while($row = $result->fetch_assoc()) {
-                echo '<tr class="student-row">';
-         
-                echo '<td>' . htmlspecialchars($row['firstname'] . ' ' . $row['lastname']) . '</td>';
-                echo '<td>' . htmlspecialchars($row['email']) . '</td>';
-                echo '<td>' . htmlspecialchars(formatStudentId($row['student_id'])) . '</td>';
-                echo '<td>' . htmlspecialchars($row['course']) . '</td>';
-                echo '<td>' . htmlspecialchars($row['classification'] ?? 'N/A') . '</td>';
-                echo '<td>' . htmlspecialchars($row['role_name']) . '</td>';
-                echo '<td>' . htmlspecialchars($row['curriculum'] ?? 'N/A') . '</td>';
-                echo '</tr>';
-            }
-            echo '</table>';
-        } else {
-            echo '<p>No students found.</p>';
-        }
-
-        $conn->close();
-        ?>
+    </div>
     </div>
 </div>
+
+<!-- Prospectus modal (loads stueval.php in an iframe, same style as registrar view) -->
+<div id="prospectusOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:2000; align-items:center; justify-content:center;">
+    <div style="background:#fff; width:95%; max-width:1200px; height:90%; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.25); display:flex; flex-direction:column; overflow:hidden;">
+        <div style="padding:10px 16px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; justify-content:space-between;">
+            <h3 style="margin:0; font-size:1rem; color:#111827;">Student Prospectus (Admin View)</h3>
+            <button type="button" onclick="closeProspectusModal()" style="border:none; background:transparent; font-size:1.25rem; cursor:pointer; line-height:1;">&times;</button>
+        </div>
+        <iframe id="prospectusFrame" src="" style="border:0; width:100%; flex:1; background:#f3f4f6;"></iframe>
+    </div>
+</div>
+
+<!-- Tabulator JS -->
+<script src="https://unpkg.com/tabulator-tables@5.5.0/dist/js/tabulator.min.js"></script>
+
 <script>
     // Dropdown functionality
     const btn = document.getElementById('studentDropdownBtn');
@@ -315,60 +215,105 @@ require_once __DIR__ . '/../db_connect.php';
             menu.style.display = 'none';
         }
     });
-    // Search functionality
-    function search() {
-        var input = document.getElementById('searchInput');
-        var filter = input.value.toLowerCase();
-        var rows = document.getElementsByClassName('student-row');
+    
+    // Expose PHP data to JS for Tabulator
+    const studentsData = <?php echo json_encode($students_data, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?> || [];
+    let studentsTable = null;
 
-        for (var i = 0; i < rows.length; i++) {
-            var name = rows[i].getElementsByTagName('td')[1].textContent.toLowerCase();
-            var id = rows[i].getElementsByTagName('td')[0].textContent.toLowerCase();
-            var email = rows[i].getElementsByTagName('td')[2].textContent.toLowerCase();
-            var studentId = rows[i].getElementsByTagName('td')[3].textContent.toLowerCase();
-            var course = rows[i].getElementsByTagName('td')[4].textContent.toLowerCase();
-            
-            if (name.indexOf(filter) > -1 || id.indexOf(filter) > -1 || 
-                email.indexOf(filter) > -1 || studentId.indexOf(filter) > -1 || 
-                course.indexOf(filter) > -1) {
-                rows[i].style.display = '';
-            } else {
-                rows[i].style.display = 'none';
+    // Download CSV using Tabulator's downloader
+    function downloadCSV() {
+        if (!studentsTable) return;
+        const filename = 'students_list_' + new Date().toISOString().slice(0, 10) + '.csv';
+        studentsTable.download('csv', filename);
+    }
+
+    // Prospectus modal helpers
+    function openProspectusModal(url) {
+        const overlay = document.getElementById('prospectusOverlay');
+        const frame = document.getElementById('prospectusFrame');
+        if (!overlay || !frame) return;
+        frame.src = url;
+        overlay.style.display = 'flex';
+    }
+
+    function closeProspectusModal() {
+        const overlay = document.getElementById('prospectusOverlay');
+        const frame = document.getElementById('prospectusFrame');
+        if (!overlay || !frame) return;
+        frame.src = '';
+        overlay.style.display = 'none';
+    }
+
+    // Open prospectus for a Tabulator row (only for irregular classification)
+    function openProspectusForStudent(rowData) {
+        if (!rowData) return;
+        const classification = (rowData.classification || '').toLowerCase();
+        if (classification !== 'irregular') return;
+
+        const studentId = rowData.student_id || '';
+        if (!studentId) return;
+
+        const program = rowData.programs || '';
+        const fiscalYear = rowData.fiscal_year || '';
+
+        const params = new URLSearchParams();
+        params.set('student_id', studentId);
+        if (program) params.set('program', program);
+        if (fiscalYear) params.set('fiscal_year', fiscalYear);
+        params.set('from_modal', '1');
+
+        const url = 'stueval.php?' + params.toString();
+        openProspectusModal(url);
+    }
+
+    // Initialize Tabulator
+    document.addEventListener('DOMContentLoaded', function() {
+        const tableEl = document.getElementById('studentsTabulator');
+        if (!tableEl) return;
+
+        studentsTable = new Tabulator(tableEl, {
+            data: studentsData,
+            layout: 'fitColumns',
+            pagination: 'local',
+            paginationSize: 25,
+            paginationSizeSelector: [25, 50, 100],
+            placeholder: 'No students found',
+            height: '600px',
+            columns: [
+                { title: 'Student ID', field: 'student_id', headerFilter: 'input', minWidth: 130 },
+                { title: 'Student Name', field: 'student_name', headerFilter: 'input', minWidth: 200 },
+                { title: 'Email', field: 'email', headerFilter: 'input', minWidth: 200 },
+                { title: 'Program', field: 'programs', headerFilter: 'input', minWidth: 160 },
+                { title: 'Year Level', field: 'academic_year', minWidth: 110 },
+                { title: 'Semester', field: 'semester', minWidth: 110 },
+                { title: 'Classification', field: 'classification', minWidth: 130 },
+                { title: 'Gender', field: 'gender', minWidth: 100 },
+                { title: 'Fiscal Year', field: 'fiscal_year', minWidth: 130 },
+                {
+                    title: 'Action',
+                    field: 'action',
+                    hozAlign: 'center',
+                    formatter: function(cell) {
+                        const data = cell.getRow().getData();
+                        const classification = (data.classification || '').toLowerCase();
+                        const isIrregular = classification === 'irregular';
+                        const btnClass = isIrregular ? 'btn btn-primary' : 'btn btn-secondary';
+                        const disabledAttr = isIrregular ? '' : 'disabled';
+                        const title = isIrregular ? 'View Prospectus' : 'Prospectus only for irregular students';
+                        return `<button type="button" class="${btnClass}" ${disabledAttr} title="${title}">View</button>`;
+                    },
+                    width: 120,
+                    cellClick: function(e, cell) {
+                        const rowData = cell.getRow().getData();
+                        openProspectusForStudent(rowData);
+                    }
+                }
+            ],
+            rowClick: function(e, row) {
+                openProspectusForStudent(row.getData());
             }
-        }
-    }
-    // Modal functionality
-    var modal = document.getElementById('studentModal');
-    var span = document.getElementsByClassName('close')[0];
-    var currentStudentId = '';
-    
-    // Show modal with student info
-    function showStudentModal(studentId, studentName) {
-        document.getElementById('modalStudentId').textContent = studentId;
-        document.getElementById('modalStudentName').textContent = studentName;
-        currentStudentId = studentId;
-        modal.style.display = 'block';
-    }
-    
-    // Close modal when clicking the X
-    span.onclick = function() {
-        modal.style.display = 'none';
-    }
-    
-    // Close modal when clicking outside
-    window.onclick = function(event) {
-        if (event.target == modal) {
-            modal.style.display = 'none';
-        }
-    }
-    
-    // Handle Add Curriculum button click
-    function addCurriculum() {
-        if (currentStudentId) {
-            // Redirect to the curriculum page with the student ID
-            window.location.href = 'student_curriculum.php?student_id=' + encodeURIComponent(currentStudentId);
-        }
-    }
+        });
+    });
     // Clock functionality
     function updateClock() {
         const now = new Date();
