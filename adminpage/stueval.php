@@ -246,6 +246,96 @@ function gradeColumn(mysqli $conn): string {
     return columnExists($conn, 'grades_db', 'final_grade') ? 'final_grade' : 'grade';
 }
 
+function isGradePassingForPromotion($gradeValue): bool {
+  if ($gradeValue === null || $gradeValue === '') {
+    return false;
+  }
+
+  if (is_numeric($gradeValue)) {
+    $gv = (float)$gradeValue;
+    // In this system, numeric grades <= 3.25 are treated as passed.
+    return $gv <= 3.25;
+  }
+
+  if (is_string($gradeValue)) {
+    $gUpper = strtoupper(trim($gradeValue));
+    return $gUpper === 'PASSED';
+  }
+
+  return false;
+}
+
+function isSubjectPassedForYearPromotion(string $courseCode, array $gradesByCode): bool {
+  $norm = normalizeCourseCode($courseCode);
+
+  // Prefer normalized code key; fall back to original code key if present
+  $gradeValue = $gradesByCode[$norm] ?? ($gradesByCode[$courseCode] ?? null);
+
+  return isGradePassingForPromotion($gradeValue);
+}
+
+/**
+ * Compute effective year level based on passed/failed subjects per year:
+ * - If all subjects in 1-1 and 1-2 are passed -> at least 2nd year
+ * - If any subject in a year (both sems) is failed/missing -> stays in that year and is irregular
+ * - Repeats for 2nd, 3rd, 4th year (2-1/2-2, 3-1/3-2, 4-1/4-2)
+ */
+function computeYearPromotion(array $curriculum, array $gradesByCode): array {
+  $effectiveYear = 1;
+  $isIrregular = false;
+  $yearStatuses = [];
+
+  for ($year = 1; $year <= 4; $year++) {
+    $ysKeys = [$year . '-1', $year . '-2'];
+    $hasSubjects = false;
+    $allPassed = true;
+
+    foreach ($ysKeys as $ys) {
+      if (!isset($curriculum[$ys]) || !is_array($curriculum[$ys])) {
+        continue;
+      }
+      foreach ($curriculum[$ys] as $course) {
+        $code = $course['code'] ?? '';
+        if ($code === '') {
+          continue;
+        }
+        $hasSubjects = true;
+        if (!isSubjectPassedForYearPromotion($code, $gradesByCode)) {
+          $allPassed = false;
+          break 2; // This year is not fully passed; stop checking further
+        }
+      }
+    }
+
+    $yearStatuses[$year] = [
+      'has_subjects' => $hasSubjects,
+      'all_passed'   => $hasSubjects && $allPassed,
+    ];
+
+    if (!$hasSubjects) {
+      // Program may not use this year level; skip it
+      continue;
+    }
+
+    if ($allPassed) {
+      // Fully passed this academic year -> promote to next (capped at 4th year)
+      $effectiveYear = min(4, $year + 1);
+      continue;
+    }
+
+    // Has at least one failed/missing subject in this year -> stay on this year and mark irregular
+    $effectiveYear = $year;
+    $isIrregular = true;
+    break;
+  }
+
+  return [
+    'effective_year' => $effectiveYear,
+    'is_irregular'   => $isIrregular,
+    'year_statuses'  => $yearStatuses,
+  ];
+}
+
 // Handle Add Subject to Irregular DB
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_irregular_subject') {
     header('Content-Type: application/json');
@@ -1072,6 +1162,34 @@ if ($program === '') {
   }
 }
 
+function loadSemesterLockStates(mysqli $conn): array {
+  $locks = [
+    1 => false,
+    2 => false,
+  ];
+
+  try {
+    $tblRes = $conn->query("SHOW TABLES LIKE 'semester_locks'");
+    if (!$tblRes || $tblRes->num_rows === 0) {
+      return $locks;
+    }
+
+    $res = $conn->query("SELECT semester, is_locked FROM semester_locks WHERE semester IN (1, 2)");
+    if ($res) {
+      while ($row = $res->fetch_assoc()) {
+        $semester = (int)($row['semester'] ?? 0);
+        if ($semester === 1 || $semester === 2) {
+          $locks[$semester] = (int)($row['is_locked'] ?? 0) === 1;
+        }
+      }
+    }
+  } catch (Throwable $e) {
+    error_log('Semester lock state load failed in stueval.php: ' . $e->getMessage());
+  }
+
+  return $locks;
+}
+
 // If still no program, check assign_curriculum table
 if (empty($program) && !empty($studentId)) {
     try {
@@ -1202,27 +1320,62 @@ if ($fiscalYear === '') {
   }
 }
 
-// Load available fiscal years from fiscal_years table (using `label` column)
+// Load available fiscal years from the actual curriculum rows first.
+// This prevents showing stale/ghost years passed via URL/query params.
 $availableFiscalYears = [];
 try {
-  $fyTableCheck = $conn->query("SHOW TABLES LIKE 'fiscal_years'");
-  if ($fyTableCheck instanceof mysqli_result && $fyTableCheck->num_rows > 0) {
-    $fyRes = $conn->query("SELECT label FROM fiscal_years ORDER BY start_date DESC, id DESC");
-    if ($fyRes instanceof mysqli_result) {
-      while ($fyRow = $fyRes->fetch_assoc()) {
-        if (!empty($fyRow['label'])) {
-          $availableFiscalYears[] = $fyRow['label'];
+  if (columnExists($conn, 'curriculum', 'fiscal_year')) {
+    $fySql = "SELECT DISTINCT fiscal_year FROM curriculum WHERE fiscal_year IS NOT NULL AND fiscal_year != ''";
+    $fyTypes = '';
+    $fyParams = [];
+
+    if ($program !== '' && columnExists($conn, 'curriculum', 'program')) {
+      $fySql .= " AND program = ?";
+      $fyTypes .= 's';
+      $fyParams[] = $program;
+    }
+
+    $fySql .= " ORDER BY fiscal_year DESC";
+    $fyStmt = $conn->prepare($fySql);
+    if ($fyStmt) {
+      if ($fyTypes !== '') {
+        $fyStmt->bind_param($fyTypes, ...$fyParams);
+      }
+      $fyStmt->execute();
+      $fyRes = $fyStmt->get_result();
+      while ($fyRes && ($fyRow = $fyRes->fetch_assoc())) {
+        $fyLabel = trim((string)($fyRow['fiscal_year'] ?? ''));
+        if ($fyLabel !== '') {
+          $availableFiscalYears[] = $fyLabel;
+        }
+      }
+      $fyStmt->close();
+    }
+  }
+
+  // Fallback to fiscal_years table only when curriculum-based list is empty.
+  if (empty($availableFiscalYears)) {
+    $fyTableCheck = $conn->query("SHOW TABLES LIKE 'fiscal_years'");
+    if ($fyTableCheck instanceof mysqli_result && $fyTableCheck->num_rows > 0) {
+      $fyRes = $conn->query("SELECT label FROM fiscal_years ORDER BY start_date DESC, id DESC");
+      if ($fyRes instanceof mysqli_result) {
+        while ($fyRow = $fyRes->fetch_assoc()) {
+          $fyLabel = trim((string)($fyRow['label'] ?? ''));
+          if ($fyLabel !== '') {
+            $availableFiscalYears[] = $fyLabel;
+          }
         }
       }
     }
   }
 } catch (Exception $e) {
-  // If table doesn't exist or query fails, the dropdown will just show the placeholder option.
+  // If lookup fails, dropdown stays with the placeholder option only.
 }
 
-// Ensure the currently selected fiscal year is present in the dropdown
+// Never keep an unknown fiscal year selected.
 if ($fiscalYear !== '' && !in_array($fiscalYear, $availableFiscalYears, true)) {
-  array_unshift($availableFiscalYears, $fiscalYear);
+  error_log("Ignoring unknown fiscal_year '$fiscalYear' for student $studentId / program $program");
+  $fiscalYear = '';
 }
 
 // Fetch curriculum for program (optionally fiscal year)
@@ -1257,12 +1410,12 @@ if ($fiscalYear !== '' && columnExists($conn, 'curriculum', 'fiscal_year')) {
 $sql .= $hasYearSem ? " ORDER BY ys, code" : " ORDER BY year, semester, code";
 $stmt = $conn->prepare($sql);
 if ($stmt) {
+  $rowCount = 0;
     if ($types !== '') {
         $stmt->bind_param($types, ...$params);
     }
     $stmt->execute();
     $res = $stmt->get_result();
-    $rowCount = 0;
     while ($row = $res->fetch_assoc()) {
         $ys = $hasYearSem ? normalizeSemesterKey($row['ys']) : (string)($row['year'] . '-' . (int)$row['semester']);
         if (!isset($curriculum[$ys])) $curriculum[$ys] = [];
@@ -1270,6 +1423,58 @@ if ($stmt) {
         $rowCount++;
     }
     $stmt->close();
+
+  // Fallback: if no curriculum rows were found with fiscal_year, retry using only program.
+  // This prevents an empty prospectus when student.fiscal_year does not exist in curriculum.
+  if ($rowCount === 0 && $program !== '' && $fiscalYear !== '' && columnExists($conn, 'curriculum', 'fiscal_year')) {
+    $fallbackCurriculum = [];
+    $fallbackSql = "SELECT $codeCol AS code, $titleCol AS title, $lecCol AS lec, $labCol AS lab, $totalCol AS units, $preCol AS prereq";
+    if ($hasYearSem) {
+      $fallbackSql .= ", year_semester AS ys";
+    } else {
+      $fallbackSql .= ", year, semester";
+    }
+    $fallbackSql .= " FROM curriculum WHERE 1=1";
+
+    $fallbackParams = [];
+    $fallbackTypes = '';
+    if (columnExists($conn, 'curriculum', 'program')) {
+      $fallbackSql .= " AND program = ?";
+      $fallbackParams[] = $program;
+      $fallbackTypes .= 's';
+    }
+    $fallbackSql .= $hasYearSem ? " ORDER BY ys, code" : " ORDER BY year, semester, code";
+
+    $fallbackStmt = $conn->prepare($fallbackSql);
+    if ($fallbackStmt) {
+      if ($fallbackTypes !== '') {
+        $fallbackStmt->bind_param($fallbackTypes, ...$fallbackParams);
+      }
+      $fallbackStmt->execute();
+      $fallbackRes = $fallbackStmt->get_result();
+      $fallbackCount = 0;
+
+      while ($fallbackRow = $fallbackRes->fetch_assoc()) {
+        $ys = $hasYearSem
+          ? normalizeSemesterKey($fallbackRow['ys'])
+          : (string)($fallbackRow['year'] . '-' . (int)$fallbackRow['semester']);
+
+        if (!isset($fallbackCurriculum[$ys])) {
+          $fallbackCurriculum[$ys] = [];
+        }
+
+        $fallbackCurriculum[$ys][] = $fallbackRow;
+        $fallbackCount++;
+      }
+      $fallbackStmt->close();
+
+      if ($fallbackCount > 0) {
+        $curriculum = $fallbackCurriculum;
+        $rowCount = $fallbackCount;
+        error_log("Fallback curriculum load succeeded for student '$studentId': program='$program', ignored fiscal_year='$fiscalYear', rows=$fallbackCount");
+      }
+    }
+  }
     
     // Debug: Show what semesters were loaded
     error_log("Curriculum loaded for program '$program': " . json_encode(array_keys($curriculum)));
@@ -1456,97 +1661,6 @@ if ($studentId !== '') {
 
         // If still no 1st Year • 1st Semester record found in grades_db,
 
-      // --- Year-level promotion helpers (1-1, 1-2, 2-1, 2-2, 3-1, 3-2, 4-1, 4-2) ---
-
-      function isGradePassingForPromotion($gradeValue): bool {
-        if ($gradeValue === null || $gradeValue === '') {
-          return false;
-        }
-
-        if (is_numeric($gradeValue)) {
-          $gv = (float)$gradeValue;
-          // In this system, numeric grades <= 3.25 are treated as passed.
-          return $gv <= 3.25;
-        }
-
-        if (is_string($gradeValue)) {
-          $gUpper = strtoupper(trim($gradeValue));
-          return $gUpper === 'PASSED';
-        }
-
-        return false;
-      }
-
-      function isSubjectPassedForYearPromotion(string $courseCode, array $gradesByCode): bool {
-        $norm = normalizeCourseCode($courseCode);
-
-        // Prefer normalized code key; fall back to original code key if present
-        $gradeValue = $gradesByCode[$norm] ?? ($gradesByCode[$courseCode] ?? null);
-
-        return isGradePassingForPromotion($gradeValue);
-      }
-
-      /**
-       * Compute effective year level based on passed/failed subjects per year:
-       * - If all subjects in 1-1 and 1-2 are passed → at least 2nd year
-       * - If any subject in a year (both sems) is failed/missing → stays in that year and is irregular
-       * - Repeats for 2nd, 3rd, 4th year (2-1/2-2, 3-1/3-2, 4-1/4-2)
-       */
-      function computeYearPromotion(array $curriculum, array $gradesByCode): array {
-        $effectiveYear = 1;
-        $isIrregular = false;
-        $yearStatuses = [];
-
-        for ($year = 1; $year <= 4; $year++) {
-          $ysKeys = [$year . '-1', $year . '-2'];
-          $hasSubjects = false;
-          $allPassed = true;
-
-          foreach ($ysKeys as $ys) {
-            if (!isset($curriculum[$ys]) || !is_array($curriculum[$ys])) {
-              continue;
-            }
-            foreach ($curriculum[$ys] as $course) {
-              $code = $course['code'] ?? '';
-              if ($code === '') {
-                continue;
-              }
-              $hasSubjects = true;
-              if (!isSubjectPassedForYearPromotion($code, $gradesByCode)) {
-                $allPassed = false;
-                break 2; // This year is not fully passed; stop checking further
-              }
-            }
-          }
-
-          $yearStatuses[$year] = [
-            'has_subjects' => $hasSubjects,
-            'all_passed'   => $hasSubjects && $allPassed,
-          ];
-
-          if (!$hasSubjects) {
-            // Program may not use this year level; skip it
-            continue;
-          }
-
-          if ($allPassed) {
-            // Fully passed this academic year → promote to next (capped at 4th year)
-            $effectiveYear = min(4, $year + 1);
-            continue;
-          }
-
-          // Has at least one failed/missing subject in this year → stay on this year and mark irregular
-          $effectiveYear = $year;
-          $isIrregular = true;
-          break;
-        }
-
-        return [
-          'effective_year' => $effectiveYear,
-          'is_irregular'   => $isIrregular,
-          'year_statuses'  => $yearStatuses,
-        ];
-      }
         // also check irregular_db so enrollment there can unlock higher-year
         // subjects even without a grade yet.
         if (!$hasFirstYearFirstSemGrade) {
@@ -1751,6 +1865,14 @@ try {
 $evaluationOpen = true;
 $enrollmentPeriodMessage = '';
 
+// Render a compact layout (no sidebar) when opened inside iframe modal.
+// Keep modal mode on subsequent Evaluate submits by honoring both GET and POST.
+$fromModal = trim((string)($_GET['from_modal'] ?? $_POST['from_modal'] ?? ''));
+$isModalView = ($fromModal === '1');
+
+// Current semester lock states used to disable semester checkboxes in the UI
+$semesterLockStates = loadSemesterLockStates($conn);
+
 try {
   $tblRes = $conn->query("SHOW TABLES LIKE 'enrollment_periods'");
   if ($tblRes && $tblRes->num_rows > 0) {
@@ -1915,6 +2037,20 @@ try {
       margin-left: 250px;
       padding: 20px;
       background: #f8f9fa;
+    }
+
+    /* Iframe modal view: hide sidebar and remove left offset */
+    .modal-view .sidebar {
+      display: none !important;
+    }
+
+    .modal-view .main-content {
+      margin-left: 0 !important;
+      padding: 12px !important;
+    }
+
+    .modal-view .prospectus {
+      margin-bottom: 0;
     }
 
     .prospectus {
@@ -2113,7 +2249,7 @@ try {
     }
   </style>
 </head>
-<body>
+<body class="<?php echo $isModalView ? 'modal-view' : ''; ?>">
   <!-- Sidebar -->
   <div class="sidebar">
     <div class="d-flex flex-column align-items-center mb-4">
@@ -2151,6 +2287,9 @@ try {
   </div>
   <div class="container my-4">
     <form method="GET" class="row g-2 align-items-end mb-3">
+      <?php if ($isModalView): ?>
+      <input type="hidden" name="from_modal" value="1">
+      <?php endif; ?>
       <div class="col-sm-4">
         <label class="form-label">Student ID</label>
         <input type="text" name="student_id" class="form-control" value="<?= htmlspecialchars($studentId) ?>" required>
@@ -2293,7 +2432,7 @@ try {
           ?>
           <span class="<?= $badgeClass ?>"><?= $classification ?></span>
           <div class="mt-1 small text-muted">
-            Year Level (by 1-1,1-2,2-1,2-2,3-1,3-2,4-1,4-2):
+            Year Level :
             <?php $yearBadgeClass = $promotionIsIrregular ? 'badge bg-danger' : 'badge bg-success'; ?>
             <span class="<?= $yearBadgeClass ?> ms-1"><?= htmlspecialchars($effectiveYearLabel) ?></span>
           </div>
@@ -2384,6 +2523,9 @@ try {
         $currentYearSem = explode('-', $ysKey);
         $currentYear = (int)($currentYearSem[0] ?? 1);
         $currentSem = (int)($currentYearSem[1] ?? 1);
+        $semesterIsLocked = !empty($semesterLockStates[$currentSem]);
+        $semesterCheckboxDisabled = $semesterIsLocked ? 'disabled aria-disabled="true"' : '';
+        $semesterSelectAllDisabled = $semesterIsLocked ? 'disabled' : '';
         
         // Calculate total units for this semester from subjects with grades only
         $semesterUnits = 0;
@@ -2556,6 +2698,9 @@ try {
         <div class="d-flex justify-content-between align-items-center mb-2">
           <div class="semester-title d-flex align-items-center">
             <?= $labels[$ysKey] ?>
+            <span class="badge ms-2 <?= $semesterIsLocked ? 'bg-danger' : 'bg-success' ?>">
+              <?= $semesterIsLocked ? 'Locked' : 'Unlocked' ?>
+            </span>
           </div>
             <div class="d-flex gap-2">
 <!-- Clickable irregular units badge: opens subject selector for this semester -->
@@ -2564,6 +2709,7 @@ try {
             </span>
             <button type="button" class="btn btn-sm btn-outline-primary select-semester" 
                     data-ys="<?= htmlspecialchars($ysKey) ?>"
+                    <?= $semesterSelectAllDisabled ?>
                     data-bs-toggle="tooltip" title="Select all subjects in this semester">
               <i class="bi bi-check-all me-1"></i> Select All
             </button>
@@ -3052,6 +3198,7 @@ if (!empty($curriculum)) {
                              data-prereq="<?= htmlspecialchars($subj['prereq'] ?? '') ?>"
                              data-year="<?= $yr ?>"
                              data-sem="<?= $sm ?>"
+                             <?= $semesterCheckboxDisabled ?>
                              disabled
                              title="This subject has already been passed">
                     <?php elseif ($isFailed): ?>
@@ -3065,6 +3212,7 @@ if (!empty($curriculum)) {
                              data-prereq="<?= htmlspecialchars($subj['prereq'] ?? '') ?>"
                              data-year="<?= $yr ?>"
                              data-sem="<?= $sm ?>"
+                             <?= $semesterCheckboxDisabled ?>
                              title="This subject needs to be retaken">
                     <?php elseif ($isCapstone1 && $capstoneBlockedByMajors): ?>
                       <span style="color: #e63e3eff; font-size: 1.2em; font-weight: bold;" title="Cannot select Capstone Project 1: you must pass all subjects that have prerequisites.">✗</span>
@@ -3077,6 +3225,7 @@ if (!empty($curriculum)) {
                              data-prereq="<?= htmlspecialchars($subj['prereq'] ?? '') ?>"
                              data-year="<?= $yr ?>"
                              data-sem="<?= $sm ?>"
+                             <?= $semesterCheckboxDisabled ?>
                              disabled
                              style="display: none;">
                     <?php elseif ($needsFirstYearFirstSemBlock): ?>
@@ -3090,6 +3239,7 @@ if (!empty($curriculum)) {
                              data-prereq="<?= htmlspecialchars($subj['prereq'] ?? '') ?>"
                              data-year="<?= $yr ?>"
                              data-sem="<?= $sm ?>"
+                             <?= $semesterCheckboxDisabled ?>
                              disabled
                              title="Cannot select: no subjects in First Year • First Semester."
                              style="display: none;">
@@ -3104,6 +3254,7 @@ if (!empty($curriculum)) {
                              data-prereq="<?= htmlspecialchars($subj['prereq'] ?? '') ?>"
                              data-year="<?= $yr ?>"
                              data-sem="<?= $sm ?>"
+                             <?= $semesterCheckboxDisabled ?>
                              disabled
                              style="display: none;">
                     <?php elseif ($prereqFailed && !$isRegular): ?>
@@ -3117,6 +3268,7 @@ if (!empty($curriculum)) {
                              data-prereq="<?= htmlspecialchars($subj['prereq'] ?? '') ?>"
                              data-year="<?= $yr ?>"
                              data-sem="<?= $sm ?>"
+                             <?= $semesterCheckboxDisabled ?>
                              disabled
                              style="display: none;">
                     <?php elseif ($isInIrregularDb): ?>
@@ -3130,6 +3282,7 @@ if (!empty($curriculum)) {
                              data-prereq="<?= htmlspecialchars($subj['prereq'] ?? '') ?>"
                              data-year="<?= $yr ?>"
                              data-sem="<?= $sm ?>"
+                             <?= $semesterCheckboxDisabled ?>
                              disabled
                              title="This subject is already in irregular subjects">
                     <?php else: ?>
@@ -3141,7 +3294,8 @@ if (!empty($curriculum)) {
                              data-lab="<?= htmlspecialchars($subj['lab'] ?? '0') ?>"
                              data-prereq="<?= htmlspecialchars($subj['prereq'] ?? '') ?>"
                              data-year="<?= $yr ?>"
-                             data-sem="<?= $sm ?>">
+                             data-sem="<?= $sm ?>"
+                             <?= $semesterCheckboxDisabled ?>>
                     <?php endif; ?>
                   </td>
                   <td class="text-center grade-cell <?= $rowClass ?> <?= ($prereqFailed && !$isRegular) ? 'prereq-failed' : '' ?>" 
@@ -3333,6 +3487,10 @@ if (!empty($curriculum)) {
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
+        <div class="alert alert-light border d-flex justify-content-between align-items-center" id="selectSubjectSummary">
+          <div><strong>Total Courses:</strong> <span id="selectSubjectCount">0</span></div>
+          <div><strong>Total Units:</strong> <span id="selectSubjectUnits">0.0</span></div>
+        </div>
         <div id="selectSubjectContainer">
           <div class="table-responsive">
             <table class="table table-hover" id="selectSubjectTable">
@@ -3857,6 +4015,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const badge = e.target.closest('.open-select-subjects');
     if (!badge) return;
 
+    const setSelectSubjectSummary = (count, totalUnits) => {
+      const countEl = document.getElementById('selectSubjectCount');
+      const unitsEl = document.getElementById('selectSubjectUnits');
+      if (countEl) countEl.textContent = String(count);
+      if (unitsEl) unitsEl.textContent = Number(totalUnits || 0).toFixed(1);
+    };
+
     e.preventDefault();
     const ys = badge.getAttribute('data-ys');
     if (!ys) return;
@@ -3869,6 +4034,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Fetch irregular subjects for this student and semester
     const studentId = '<?= htmlspecialchars($studentId) ?>';
     if (!studentId) {
+      setSelectSubjectSummary(0, 0);
       tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No student selected.</td></tr>';
       const selectModalEl = document.getElementById('selectSubjectModal');
       bootstrap.Modal.getOrCreateInstance(selectModalEl).show();
@@ -3892,15 +4058,18 @@ document.addEventListener('DOMContentLoaded', function() {
         // Debug: Log the raw response text if parsing fails
         if (!data) {
           console.error('Empty or invalid response from server');
+          setSelectSubjectSummary(0, 0);
           tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Invalid response from server. Check console for details.</td></tr>';
           return;
         }
         
         if (!data.success) {
           console.error('Server returned error:', data.message || 'No error message');
+          setSelectSubjectSummary(0, 0);
           tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">${data.message || 'Failed to load irregular subjects. Check console for details.'}</td></tr>`;
         } else if (!data.data || data.data.length === 0) {
           console.log('No data returned for student', studentId, 'and semester', ys);
+          setSelectSubjectSummary(0, 0);
           tbody.innerHTML = `
             <tr>
               <td colspan="6" class="text-center text-muted">
@@ -3909,6 +4078,11 @@ document.addEventListener('DOMContentLoaded', function() {
               </td>
             </tr>`;
         } else {
+          const totalUnits = data.data.reduce((sum, row) => {
+            return sum + (parseFloat(row.total_units) || 0);
+          }, 0);
+          setSelectSubjectSummary(data.data.length, totalUnits);
+
           data.data.forEach(r => {
             const tr = document.createElement('tr');
             tr.innerHTML = `
@@ -4206,6 +4380,29 @@ document.addEventListener('DOMContentLoaded', function() {
     const selectedCount = document.getElementById('selectedCount');
     const selectedSubjectsList = document.getElementById('selectedSubjectsList');
     const totalUnitsBadge = document.getElementById('totalUnitsBadge');
+    const selectedProgram = '<?= htmlspecialchars($program ?: 'BSIT') ?>';
+    const unitLimits = <?= json_encode($unitLimits) ?>;
+    const studentClassification = String(window.studentClassification || '').toLowerCase();
+    const isIrregularStudent = studentClassification.includes('irregular');
+
+    // Floating quick summary (always visible while scrolling)
+    const floatingCounter = document.createElement('div');
+    floatingCounter.id = 'floatingSelectionCounter';
+    floatingCounter.style.position = 'fixed';
+    floatingCounter.style.right = '16px';
+    floatingCounter.style.bottom = '16px';
+    floatingCounter.style.zIndex = '1080';
+    floatingCounter.style.minWidth = '260px';
+    floatingCounter.style.maxWidth = '360px';
+    floatingCounter.style.background = '#0d6efd';
+    floatingCounter.style.color = '#fff';
+    floatingCounter.style.borderRadius = '12px';
+    floatingCounter.style.boxShadow = '0 8px 24px rgba(0,0,0,0.2)';
+    floatingCounter.style.padding = '10px 12px';
+    floatingCounter.style.fontSize = '13px';
+    floatingCounter.style.display = 'none';
+    floatingCounter.innerHTML = '<div><strong>Selected:</strong> 0 subjects</div><div><strong>Units:</strong> 0.0</div>';
+    document.body.appendChild(floatingCounter);
     
     // Normalize a course code similar to PHP's normalizeCourseCode
     function normalizeCode(code) {
@@ -4217,6 +4414,200 @@ document.addEventListener('DOMContentLoaded', function() {
     // Build a Set of passed subject codes for fast lookup
     const passedSubjectCodes = Array.isArray(window.passedSubjects) ? window.passedSubjects : [];
     const passedSubjectsSet = new Set(passedSubjectCodes.map(normalizeCode));
+
+    function parseUnits(text) {
+      const match = String(text || '').match(/([\d.]+)/);
+      return match ? (parseFloat(match[1]) || 0) : 0;
+    }
+
+    function getCheckboxYearSem(checkbox) {
+      const y = String(checkbox?.dataset?.year || '').trim();
+      const s = String(checkbox?.dataset?.sem || '').trim();
+      return `${y}-${s}`;
+    }
+
+    function formatSelectedYearSemLabel(ys) {
+      return formatSemesterLabel(ys || '');
+    }
+
+    function findMismatchedSelections(selectedYearSem) {
+      const checked = Array.from(document.querySelectorAll('.subject-checkbox:checked'));
+      if (!selectedYearSem) {
+        return checked;
+      }
+      return checked.filter(cb => getCheckboxYearSem(cb) !== selectedYearSem);
+    }
+
+    function showSwalWarning(title, html) {
+      if (typeof Swal !== 'undefined') {
+        Swal.fire({
+          icon: 'warning',
+          title,
+          html,
+          confirmButtonText: 'OK'
+        });
+      } else {
+        alert(title);
+      }
+    }
+
+    function getCurrentIrregularUnitsBySemester() {
+      const unitsBySemester = {};
+      document.querySelectorAll('div.mb-4[data-ys]').forEach(block => {
+        const ys = block.getAttribute('data-ys');
+        if (!ys) return;
+        const irregularBadge = block.querySelector('.open-select-subjects');
+        unitsBySemester[ys] = irregularBadge ? parseUnits(irregularBadge.textContent) : 0;
+      });
+      return unitsBySemester;
+    }
+
+    function getMaxUnitsForSemester(ys) {
+      if (unitLimits[selectedProgram] && unitLimits[selectedProgram][ys]) {
+        return parseFloat(unitLimits[selectedProgram][ys].max) || 26;
+      }
+      return 26;
+    }
+
+    function summarizeCheckedSubjects() {
+      const checked = Array.from(document.querySelectorAll('.subject-checkbox:checked'));
+      const selectedUnitsBySemester = {};
+      let totalSelectedUnits = 0;
+
+      checked.forEach(cb => {
+        const y = cb.dataset.year || '';
+        const s = cb.dataset.sem || '';
+        const ys = `${y}-${s}`;
+        const units = parseFloat(cb.dataset.units) || 0;
+
+        totalSelectedUnits += units;
+        selectedUnitsBySemester[ys] = (selectedUnitsBySemester[ys] || 0) + units;
+      });
+
+      return {
+        checked,
+        totalSelectedUnits,
+        selectedUnitsBySemester
+      };
+    }
+
+    function buildOverloadWarnings(summary) {
+      const warnings = [];
+      const currentIrregularBySemester = getCurrentIrregularUnitsBySemester();
+
+      Object.keys(summary.selectedUnitsBySemester).forEach(ys => {
+        const currentIrregularUnits = currentIrregularBySemester[ys] || 0;
+        const selectedUnits = summary.selectedUnitsBySemester[ys] || 0;
+        const maxUnits = getMaxUnitsForSemester(ys);
+        const afterTotal = currentIrregularUnits + selectedUnits;
+
+        if (afterTotal > maxUnits) {
+          warnings.push({
+            ys,
+            currentIrregularUnits,
+            selectedUnits,
+            afterTotal,
+            maxUnits,
+            overBy: afterTotal - maxUnits
+          });
+        }
+      });
+
+      return warnings;
+    }
+
+    function formatSemesterLabel(ys) {
+      const map = {
+        '1-1': 'First Year - First Semester',
+        '1-2': 'First Year - Second Semester',
+        '2-1': 'Second Year - First Semester',
+        '2-2': 'Second Year - Second Semester',
+        '3-1': 'Third Year - First Semester',
+        '3-2': 'Third Year - Second Semester',
+        '4-1': 'Fourth Year - First Semester',
+        '4-2': 'Fourth Year - Second Semester'
+      };
+      return map[ys] || ys;
+    }
+
+    function createSemesterLiveBadges() {
+      document.querySelectorAll('div.mb-4[data-ys]').forEach(block => {
+        const ys = block.getAttribute('data-ys');
+        if (!ys) return;
+
+        const badgeContainer = block.querySelector('.d-flex.gap-2');
+        if (!badgeContainer) return;
+        if (badgeContainer.querySelector('.selected-live-units')) return;
+
+        const selectedBadge = document.createElement('span');
+        selectedBadge.className = 'badge bg-info rounded-pill selected-live-units';
+        selectedBadge.setAttribute('data-selected-ys', ys);
+        selectedBadge.setAttribute('title', 'Selected units in this semester');
+        selectedBadge.innerHTML = '<i class="bi bi-check2-square me-1"></i> Selected: 0.0';
+
+        // Place before Select All button for better visibility
+        const selectBtn = badgeContainer.querySelector('.select-semester');
+        if (selectBtn) {
+          badgeContainer.insertBefore(selectedBadge, selectBtn);
+        } else {
+          badgeContainer.appendChild(selectedBadge);
+        }
+      });
+    }
+
+    function updateSemesterLiveBadges(summary, warnings) {
+      document.querySelectorAll('.selected-live-units').forEach(badge => {
+        const ys = badge.getAttribute('data-selected-ys') || '';
+        const selectedUnits = summary.selectedUnitsBySemester[ys] || 0;
+        const maxUnits = getMaxUnitsForSemester(ys);
+        const isOver = warnings.some(w => w.ys === ys);
+
+        badge.classList.remove('bg-info', 'bg-danger');
+        badge.classList.add(isOver ? 'bg-danger' : 'bg-info');
+        badge.innerHTML = `<i class="bi bi-check2-square me-1"></i> Selected: ${selectedUnits.toFixed(1)} / ${maxUnits.toFixed(1)}`;
+      });
+    }
+
+    function updateFloatingCounter(summary, warnings) {
+      const count = summary.checked.length;
+      const totalUnits = summary.totalSelectedUnits;
+
+      if (count === 0) {
+        floatingCounter.style.display = 'none';
+        return;
+      }
+
+      floatingCounter.style.display = 'block';
+      floatingCounter.style.background = warnings.length ? '#dc3545' : '#0d6efd';
+      floatingCounter.innerHTML = `
+        <div><strong>Selected:</strong> ${count} subject${count !== 1 ? 's' : ''}</div>
+        <div><strong>Units:</strong> ${totalUnits.toFixed(1)}</div>
+        <div><strong>Status:</strong> ${warnings.length ? 'Over limit' : 'Within limit'}</div>
+      `;
+    }
+
+    function renderUnitWarnings(warnings) {
+      let warningContainer = document.getElementById('selectedUnitWarnings');
+      if (!warningContainer) {
+        warningContainer = document.createElement('div');
+        warningContainer.id = 'selectedUnitWarnings';
+        warningContainer.className = 'mt-2';
+        selectedSubjectsInfo.appendChild(warningContainer);
+      }
+
+      if (!warnings.length) {
+        warningContainer.innerHTML = '';
+        return;
+      }
+
+      warningContainer.innerHTML = warnings.map(w => `
+        <div class="alert alert-warning py-2 mb-2">
+          <strong>${formatSemesterLabel(w.ys)}:</strong>
+          ${w.afterTotal.toFixed(1)} / ${w.maxUnits.toFixed(1)} units
+          <span class="ms-2">(Over by ${w.overBy.toFixed(1)} units)</span>
+        </div>
+      `).join('');
+    }
 
     // Validate prerequisites for a selected subject-checkbox using its data-prereq
     function checkPrerequisites(checkbox) {
@@ -4298,36 +4689,45 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Update selected subjects display
     function updateSelectedDisplay() {
-        const selectedCheckboxes = document.querySelectorAll('.subject-checkbox:checked');
-        const count = selectedCheckboxes.length;
-        
-        // Calculate total units
-        let totalUnits = 0;
-        selectedCheckboxes.forEach(checkbox => {
-            const units = parseFloat(checkbox.dataset.units) || 0;
-            totalUnits += units;
-        });
+      const summary = summarizeCheckedSubjects();
+      const selectedCheckboxes = summary.checked;
+      const count = selectedCheckboxes.length;
+      const totalUnits = summary.totalSelectedUnits;
+      const overloadWarnings = buildOverloadWarnings(summary);
+      const currentIrregularBySemester = getCurrentIrregularUnitsBySemester();
+
+      updateSemesterLiveBadges(summary, overloadWarnings);
+      updateFloatingCounter(summary, overloadWarnings);
         
         selectedCount.textContent = count + ' subject' + (count !== 1 ? 's' : '') + ' (' + totalUnits.toFixed(1) + ' units)';
         
-        // Update badge with color based on total units
+      // Update badge using curriculum-based per-semester limits (not fixed thresholds)
+      const selectedYearSem = (bulkYearSem && bulkYearSem.value) ? bulkYearSem.value : '';
+      if (selectedYearSem) {
+        const selectedInSem = summary.selectedUnitsBySemester[selectedYearSem] || 0;
+        const currentInSem = currentIrregularBySemester[selectedYearSem] || 0;
+        const maxInSem = getMaxUnitsForSemester(selectedYearSem);
+        const totalAfter = currentInSem + selectedInSem;
+        totalUnitsBadge.textContent = `${selectedInSem.toFixed(1)} sel | ${totalAfter.toFixed(1)} / ${maxInSem.toFixed(1)}`;
+      } else {
         totalUnitsBadge.textContent = totalUnits.toFixed(1) + ' units';
+      }
+
         totalUnitsBadge.className = 'badge fs-6';
-        
-        if (totalUnits >= 26) {
-            totalUnitsBadge.classList.add('bg-danger'); // Red for high units
-        } else if (totalUnits >= 24) {
-            totalUnitsBadge.classList.add('bg-warning'); // Orange for medium-high units
-        } else if (totalUnits >= 22) {
-            totalUnitsBadge.classList.add('bg-info'); // Blue for medium units
-        } else if (totalUnits >= 20) {
-            totalUnitsBadge.classList.add('bg-success'); // Green for low-medium units
+
+      if (selectedYearSem) {
+        const selectedInSem = summary.selectedUnitsBySemester[selectedYearSem] || 0;
+        const currentInSem = currentIrregularBySemester[selectedYearSem] || 0;
+        const maxInSem = getMaxUnitsForSemester(selectedYearSem);
+        const totalAfter = currentInSem + selectedInSem;
+        totalUnitsBadge.classList.add(totalAfter > maxInSem ? 'bg-danger' : 'bg-success');
         } else {
-            totalUnitsBadge.classList.add('bg-secondary'); // Gray for very low units
+        totalUnitsBadge.classList.add(overloadWarnings.length > 0 ? 'bg-danger' : 'bg-primary');
         }
         
         if (count > 0) {
             selectedSubjectsInfo.style.display = 'block';
+          renderUnitWarnings(overloadWarnings);
             
             // Build list of selected subjects
             let listHTML = '<div class="row">';
@@ -4347,13 +4747,20 @@ document.addEventListener('DOMContentLoaded', function() {
             listHTML += '</div>';
             selectedSubjectsList.innerHTML = listHTML;
             
-            // Enable save button if year-semester is selected
-            bulkSaveBtn.disabled = !bulkYearSem.value;
+            // For irregular students, allow saving mixed year/semester selections.
+            bulkSaveBtn.disabled = isIrregularStudent ? false : !bulkYearSem.value;
         } else {
+            renderUnitWarnings([]);
             selectedSubjectsInfo.style.display = 'none';
             bulkSaveBtn.disabled = true;
         }
+
+          return overloadWarnings;
     }
+
+            // Initialize live badges/counters once page is ready
+            createSemesterLiveBadges();
+            updateSelectedDisplay();
     
     // Select all functionality
     if (selectAllCheckbox) {
@@ -4368,6 +4775,29 @@ document.addEventListener('DOMContentLoaded', function() {
     // Individual checkbox changes with prerequisite validation
     subjectCheckboxes.forEach(checkbox => {
       checkbox.addEventListener('change', function() {
+        const selectedYearSem = (bulkYearSem && bulkYearSem.value) ? bulkYearSem.value : '';
+        const subjectYearSem = getCheckboxYearSem(this);
+
+        if (!isIrregularStudent && this.checked && !selectedYearSem) {
+          this.checked = false;
+          showSwalWarning(
+            'Select Year and Semester First',
+            'Please select the target <strong>Year and Semester</strong> in Bulk Save before choosing subjects.'
+          );
+          updateSelectedDisplay();
+          return;
+        }
+
+        if (!isIrregularStudent && this.checked && selectedYearSem && subjectYearSem !== selectedYearSem) {
+          this.checked = false;
+          showSwalWarning(
+            'Subject Semester Mismatch',
+            `This subject belongs to <strong>${formatSelectedYearSemLabel(subjectYearSem)}</strong>.<br>Please select subjects only from <strong>${formatSelectedYearSemLabel(selectedYearSem)}</strong>.`
+          );
+          updateSelectedDisplay();
+          return;
+        }
+
         // Only validate when trying to select the subject
         if (this.checked) {
           const ok = checkPrerequisites(this);
@@ -4376,12 +4806,72 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
           }
         }
-        updateSelectedDisplay();
+        const overloadWarnings = updateSelectedDisplay();
+
+        // Show a reminder immediately when the clicked subject pushes units over limit.
+        if (this.checked) {
+          const ys = `${this.dataset.year || ''}-${this.dataset.sem || ''}`;
+          const warning = overloadWarnings.find(w => w.ys === ys);
+          if (warning) {
+            if (typeof Swal !== 'undefined') {
+              Swal.fire({
+                icon: 'warning',
+                title: 'Unit Reminder',
+                html: `
+                  <p><strong>${formatSemesterLabel(warning.ys)}</strong> is over the unit limit.</p>
+                  <p>Current irregular: ${warning.currentIrregularUnits.toFixed(1)} units</p>
+                  <p>Selected now: ${warning.selectedUnits.toFixed(1)} units</p>
+                  <p>Total: <strong>${warning.afterTotal.toFixed(1)}</strong> / ${warning.maxUnits.toFixed(1)} units</p>
+                  <p>Over by: <strong>${warning.overBy.toFixed(1)}</strong> units</p>
+                `,
+                confirmButtonText: 'OK'
+              });
+            } else {
+              alert(`${formatSemesterLabel(warning.ys)} is over the unit limit by ${warning.overBy.toFixed(1)} units.`);
+            }
+          }
+        }
       });
     });
     
     // Year-semester selection change
     bulkYearSem.addEventListener('change', function() {
+        const selectedYearSem = this.value || '';
+
+        if (isIrregularStudent) {
+          updateSelectedDisplay();
+          const hasSelection = document.querySelectorAll('.subject-checkbox:checked').length > 0;
+          bulkSaveBtn.disabled = !hasSelection;
+          return;
+        }
+
+        const mismatched = findMismatchedSelections(selectedYearSem);
+        if (selectedYearSem && mismatched.length > 0) {
+          mismatched.forEach(cb => {
+            cb.checked = false;
+          });
+
+          showSwalWarning(
+            'Selection Updated',
+            `Removed <strong>${mismatched.length}</strong> subject(s) that do not belong to <strong>${formatSelectedYearSemLabel(selectedYearSem)}</strong>.`
+          );
+        }
+
+        if (!selectedYearSem) {
+          const checkedNow = Array.from(document.querySelectorAll('.subject-checkbox:checked'));
+          if (checkedNow.length > 0) {
+            checkedNow.forEach(cb => {
+              cb.checked = false;
+            });
+
+            showSwalWarning(
+              'Year and Semester Required',
+              'Subject selection was cleared. Please choose a target <strong>Year and Semester</strong> first.'
+            );
+          }
+        }
+
+        updateSelectedDisplay();
         const hasSelection = document.querySelectorAll('.subject-checkbox:checked').length > 0;
         bulkSaveBtn.disabled = !this.value || !hasSelection;
     });
@@ -4401,20 +4891,79 @@ document.addEventListener('DOMContentLoaded', function() {
     bulkSaveBtn.addEventListener('click', function() {
         const selectedCheckboxes = document.querySelectorAll('.subject-checkbox:checked');
         const yearSem = bulkYearSem.value;
+        const summary = summarizeCheckedSubjects();
+        const overloadWarnings = buildOverloadWarnings(summary);
         
-        if (!yearSem) {
-            alert('Please select a year and semester.');
+        if (!isIrregularStudent && !yearSem) {
+            if (typeof Swal !== 'undefined') {
+              Swal.fire({
+                icon: 'warning',
+                title: 'Missing Year and Semester',
+                text: 'Please select a year and semester first.',
+                confirmButtonText: 'OK'
+              });
+            } else {
+              alert('Please select a year and semester.');
+            }
             return;
         }
         
         if (selectedCheckboxes.length === 0) {
-            alert('Please select at least one subject.');
+            if (typeof Swal !== 'undefined') {
+              Swal.fire({
+                icon: 'warning',
+                title: 'No Subjects Selected',
+                text: 'Please select at least one subject.',
+                confirmButtonText: 'OK'
+              });
+            } else {
+              alert('Please select at least one subject.');
+            }
             return;
+        }
+
+        const mismatched = !isIrregularStudent
+          ? Array.from(selectedCheckboxes).filter(cb => getCheckboxYearSem(cb) !== yearSem)
+          : [];
+        if (!isIrregularStudent && mismatched.length > 0) {
+            const sample = mismatched.slice(0, 5).map(cb => cb.value || cb.dataset.code || '').filter(Boolean);
+            if (typeof Swal !== 'undefined') {
+              Swal.fire({
+                icon: 'error',
+                title: 'Semester Mismatch Detected',
+                html: `
+                  <p>${mismatched.length} selected subject(s) are not from <strong>${formatSelectedYearSemLabel(yearSem)}</strong>.</p>
+                  ${sample.length ? `<p>Examples: <strong>${sample.join(', ')}</strong></p>` : ''}
+                  <p>Please keep only subjects from the selected semester.</p>
+                `,
+                confirmButtonText: 'OK'
+              });
+            } else {
+              alert('Some selected subjects do not match the selected year and semester.');
+            }
+            return;
+        }
+
+        // For irregular mixed-semester selection, block save if any affected semester exceeds max units.
+        if (overloadWarnings.length > 0) {
+          const lines = overloadWarnings.map(w =>
+            `<li><strong>${formatSemesterLabel(w.ys)}</strong>: ${w.afterTotal.toFixed(1)} / ${w.maxUnits.toFixed(1)} (over by ${w.overBy.toFixed(1)})</li>`
+          ).join('');
+          if (typeof Swal !== 'undefined') {
+            Swal.fire({
+              icon: 'error',
+              title: 'Unit Limit Exceeded',
+              html: `<p>Please fix overload before saving:</p><ul style="text-align:left;">${lines}</ul>`,
+              confirmButtonText: 'Okay'
+            });
+          } else {
+            alert('Unit limit exceeded in selected semesters. Please reduce selection.');
+          }
+          return;
         }
         
         // Get program and unit limits from server-side data
-        const program = '<?= htmlspecialchars($program ?: 'BSIT') ?>';
-        const unitLimits = <?= json_encode($unitLimits) ?>;
+        const program = selectedProgram;
         
         // Debug logging
         console.log('Program:', program);
@@ -4423,7 +4972,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Get current units from irregular_db only (not including curriculum subjects)
         let currentUnits = 0;
-        const semesterBlock = document.querySelector(`div.mb-4[data-ys="${yearSem}"]`);
+        const semesterBlock = yearSem ? document.querySelector(`div.mb-4[data-ys="${yearSem}"]`) : null;
         if (semesterBlock) {
             // Look for irregular units badge specifically, not the total badge
             const irregularBadge = semesterBlock.querySelector('.badge.bg-success.rounded-pill');
@@ -4461,7 +5010,7 @@ document.addEventListener('DOMContentLoaded', function() {
         let maxUnits = unitLimits[program] && unitLimits[program][yearSem] ? unitLimits[program][yearSem].max : 26;
         
         // Check if adding these subjects would exceed the limit
-        if (totalUnitsAfter > maxUnits) {
+        if (!isIrregularStudent && totalUnitsAfter > maxUnits) {
             const overBy = (totalUnitsAfter - maxUnits).toFixed(1);
            Swal.fire({
     icon: 'error',
@@ -4485,12 +5034,14 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         
-        const [year, sem] = yearSem.split('-');
+        const [year, sem] = yearSem ? yearSem.split('-') : ['', ''];
         const studentId = '<?= htmlspecialchars($studentId) ?>';
         
         // Prepare data for saving
         const subjects = [];
         selectedCheckboxes.forEach(checkbox => {
+          const subjectYear = checkbox.dataset.year || year;
+          const subjectSem = checkbox.dataset.sem || sem;
             subjects.push({
                 course_code: checkbox.value,
                 course_title: checkbox.dataset.title,
@@ -4498,8 +5049,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 lec_units: checkbox.dataset.lec,
                 lab_units: checkbox.dataset.lab,
                 prerequisites: checkbox.dataset.prereq,
-                year_level: year,
-                semester: sem
+            year_level: subjectYear,
+            semester: subjectSem
             });
         });
         
@@ -4520,7 +5071,8 @@ document.addEventListener('DOMContentLoaded', function() {
             body: JSON.stringify({
                 action: 'bulk_save_irregular',
                 student_id: studentId,
-                subjects: subjects
+            subjects: subjects,
+            program: program
             })
         })
         .then(response => {

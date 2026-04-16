@@ -1,4 +1,7 @@
 <?php
+// Use Philippine time across the application.
+date_default_timezone_set('Asia/Manila');
+
 // Detect environment: localhost (XAMPP/dev) vs production (hosting)
 $host = $_SERVER['HTTP_HOST'] ?? '';
 
@@ -60,4 +63,7 @@ $conn->set_charset("utf8mb4");
 $conn->query("SET NAMES 'utf8mb4' COLLATE 'utf8mb4_unicode_ci'");
 $conn->query("SET CHARACTER SET utf8mb4");
 $conn->query("SET SESSION collation_connection = 'utf8mb4_unicode_ci'");
+
+// Keep MySQL date/time functions (NOW, CURRENT_TIMESTAMP) in Asia/Manila (+08:00).
+$conn->query("SET time_zone = '+08:00'");
 ?>

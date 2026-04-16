@@ -7,41 +7,6 @@ $error = '';
 $search_results = [];
 $search_performed = false;
 
-
-if (!empty($_GET['search_student']) || !empty($_GET['search_course'])) {
-    $search_student = $conn->real_escape_string($_GET['search_student'] ?? '');
-    $search_course = $conn->real_escape_string($_GET['search_course'] ?? '');
-    
-    $where_conditions = [];
-    $params = [];
-    $types = '';
-    
-    if (!empty($search_student)) {
-        $where_conditions[] = "student_id LIKE ?";
-        $params[] = "%$search_student%";
-        $types .= 's';
-    }
-    
-    if (!empty($search_course)) {
-        $where_conditions[] = "course_code LIKE ?";
-        $params[] = "%$search_course%";
-        $types .= 's';
-    }
-    
-    if (!empty($where_conditions)) {
-        $sql = "SELECT * FROM grades_db WHERE " . implode(' AND ', $where_conditions) . " ORDER BY student_id, year, sem, course_code";
-        $stmt = $conn->prepare($sql);
-        
-        if ($stmt && !empty($params)) {
-            $stmt->bind_param($types, ...$params);
-            $stmt->execute();
-            $search_results = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-            $search_performed = true;
-        }
-        $stmt->close();
-    }
-}
-
 // Handle grade entry (but ignore archive requests)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['archive'])) {
     $student_id = trim($conn->real_escape_string($_POST['student_id'] ?? ''));
@@ -155,6 +120,56 @@ if ($student_result) {
         $student_ids[] = $row['student_id'];
     }
 }
+
+// Prepare grade rows for Tabulator
+$display_data = [];
+$grades_result = $conn->query("SELECT * FROM grades_db ORDER BY student_id, year, sem, course_code");
+if ($grades_result) {
+    $display_data = $grades_result->fetch_all(MYSQLI_ASSOC);
+}
+$grades_data = [];
+
+foreach ($display_data as $row) {
+    $gradeValue = $row['final_grade'] ?? '';
+    $displayGrade = $gradeValue;
+    $statusHtml = '';
+    $rowClass = '';
+
+    if (is_numeric($gradeValue)) {
+        $numericGrade = (float)$gradeValue;
+
+        if ($numericGrade <= 3.0) {
+            $rowClass = 'grade-success';
+            $statusHtml = '<span class="badge bg-success">Passed</span>';
+        } elseif ($numericGrade >= 3.25 && $numericGrade <= 4.0) {
+            $rowClass = 'grade-warning';
+            $statusHtml = '<span class="badge bg-warning text-dark">Incomplete</span>';
+            $displayGrade = 'INC';
+        } elseif ($numericGrade >= 5.0) {
+            $rowClass = 'grade-danger';
+            $statusHtml = '<span class="badge bg-danger">Failed</span>';
+            $displayGrade = 'Failed';
+        } else {
+            $rowClass = 'grade-danger';
+            $statusHtml = '<span class="badge bg-danger">Failed</span>';
+            $displayGrade = 'Failed';
+        }
+    } else {
+        $statusHtml = '<span class="badge bg-secondary">N/A</span>';
+    }
+
+    $grades_data[] = [
+        'student_id' => $row['student_id'] ?? '',
+        'course_code' => $row['course_code'] ?? '',
+        'course_title' => $row['course_title'] ?? 'N/A',
+        'year' => $row['year'] ?? '',
+        'sem' => $row['sem'] ?? '',
+        'final_grade' => $gradeValue,
+        'display_grade' => $displayGrade,
+        'status_html' => $statusHtml,
+        'row_class' => $rowClass,
+    ];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -163,6 +178,7 @@ if ($student_result) {
     <title>Grade Management System</title> <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <link href="https://unpkg.com/tabulator-tables@5.5.0/dist/css/tabulator_bootstrap5.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
         .grade-success { background-color: #d4edda !important; }
@@ -171,6 +187,20 @@ if ($student_result) {
         .search-section { background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
         /* Blue gradient for stats cards */
         .stats-card { background: linear-gradient(135deg, #2563eb 0%, #60a5fa 100%) !important; color: white; }
+        .grades-table-shell {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+        }
+        #gradesTabulator {
+            min-height: 420px;
+        }
+        .tabulator {
+            border-radius: 10px;
+            overflow: hidden;
+        }
     </style>
 </head>
 <body class="bg-light">
@@ -182,29 +212,6 @@ if ($student_result) {
             <div class="col-12">
                 <h2 class="mb-3"><i class="bi bi-mortarboard"></i> Grade Management System</h2>
             </div>
-        </div>
-
-        <!-- Search Section -->
-        <div class="search-section">
-            <h4 class="mb-3"><i class="bi bi-search"></i> Search Grades</h4>
-            <form method="GET" class="row g-3">
-                <div class="col-md-4">
-                    <label class="form-label">Student ID</label>
-                    <input type="text" name="search_student" class="form-control" value="<?= htmlspecialchars($_GET['search_student'] ?? '') ?>" placeholder="Enter student ID">
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">Course Code</label>
-                    <input type="text" name="search_course" class="form-control" value="<?= htmlspecialchars($_GET['search_course'] ?? '') ?>" placeholder="Enter course code">
-                </div>
-                <div class="col-md-4 d-flex align-items-end">
-                    <button type="submit" class="btn btn-primary me-2">
-                        <i class="bi bi-search"></i> Search
-                    </button>
-                    <a href="stugra.php" class="btn btn-secondary">
-                        <i class="bi bi-arrow-clockwise"></i> Clear
-                    </a>
-                </div>
-            </form>
         </div>
 
         <div class="mb-3 d-flex gap-2">
@@ -220,94 +227,19 @@ if ($student_result) {
         <div class="mt-5">
             <h4 class="mb-3">
                 <i class="bi bi-table"></i> 
-                <?= $search_performed ? 'Search Results' : 'All Grades Database' ?>
+                All Grades Database
             </h4>
             
-            <div class="table-responsive">
-                <table class="table table-sm table-bordered table-hover">
-                    <thead class="table-dark">
-                        <tr>
-                            <th>Student ID</th>
-                            <th>Course Code</th>
-                            <th>Course Title</th>
-                            <th>Year</th>
-                            <th>Semester</th>
-                            <th>Grade</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    <?php
-                    $display_data = $search_performed ? $search_results : $conn->query("SELECT * FROM grades_db ORDER BY student_id, year, sem, course_code")->fetch_all(MYSQLI_ASSOC);
-                    
-                    if (!empty($display_data)):
-                        foreach ($display_data as $row): 
-                            $grade = $row['final_grade'];
-                            $grade_class = '';
-                            $status = '';
-                            $display_grade = $grade;
-                            
-                            if (is_numeric($grade)) {
-                                if ($grade <= 3.0) {
-                                    $grade_class = 'grade-success';
-                                    $status = '<span class="badge bg-success">Passed</span>';
-                                } elseif ($grade >= 3.25 && $grade <= 4.0) {
-                                    $grade_class = 'grade-warning';
-                                    $status = '<span class="badge bg-warning text-dark">Incomplete</span>';
-                                    $display_grade = 'INC';
-                                } elseif ($grade >= 5.0) {
-                                    $grade_class = 'grade-danger';
-                                    $status = '<span class="badge bg-danger">Failed</span>';
-                                    $display_grade = 'Failed';
-                                } else {
-                                    // Handle grades between 4.0 and 5.0 (if any)
-                                    $grade_class = 'grade-danger';
-                                    $status = '<span class="badge bg-danger">Failed</span>';
-                                    $display_grade = 'Failed';
-                                }
-                            }
-                    ?>
-                            <tr class="<?= $grade_class ?>">
-                                <td><strong><?= htmlspecialchars($row['student_id']) ?></strong></td>
-                                <td><code><?= htmlspecialchars($row['course_code']) ?></code></td>
-                                <td><?= htmlspecialchars($row['course_title'] ?? 'N/A') ?></td>
-                                <td><?= htmlspecialchars($row['year']) ?></td>
-                                <td><?= htmlspecialchars($row['sem']) ?></td>
-                                <td><strong><?= htmlspecialchars($display_grade) ?></strong></td>
-                                <td><?= $status ?></td>
-                                <td>
-                                    <button class="btn btn-sm btn-outline-primary" onclick="editGrade('<?= htmlspecialchars($row['student_id']) ?>', '<?= htmlspecialchars($row['course_code']) ?>', '<?= htmlspecialchars($row['year']) ?>', '<?= htmlspecialchars($row['sem']) ?>', '<?= htmlspecialchars($grade) ?>', '<?= htmlspecialchars($row['course_title'] ?? '') ?>')">
-                                        <i class="bi bi-pencil"></i>
-                                    </button>
-                                    <form method="POST" action="" style="display:inline;" class="archive-form">
-                                        <input type="hidden" name="archive" value="1">
-                                        <input type="hidden" name="student_id" value="<?= htmlspecialchars($row['student_id']) ?>">
-                                        <input type="hidden" name="course_code" value="<?= htmlspecialchars($row['course_code']) ?>">
-                                        <input type="hidden" name="year" value="<?= htmlspecialchars($row['year']) ?>">
-                                        <input type="hidden" name="sem" value="<?= htmlspecialchars($row['sem']) ?>">
-                                        <button type="submit" class="btn btn-sm btn-outline-warning" title="Archive">
-                                            <i class="bi bi-archive"></i>
-                                        </button>
-                                    </form>
-                                </td>
-                            </tr>
-                    <?php endforeach;
-                    else: ?>
-                        <tr>
-                            <td colspan="8" class="text-center py-4">
-                                <div>
-                                    <i class="bi bi-inbox" style="font-size: 3rem; color: #6c757d;"></i><br>
-                                    <h5 class="mt-2">No grades found</h5>
-                                    <p class="text-muted">
-                                        <?= $search_performed ? 'Try adjusting your search criteria.' : 'Use Upload CSV to insert records.' ?>
-                                    </p>
-                                </div>
-                            </td>
-</tr>
-                    <?php endif; ?>
-                    </tbody>
-                </table>
+            <div class="grades-table-shell">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                    <div class="text-muted small">
+                        <?= count($grades_data) ?> record<?= count($grades_data) === 1 ? '' : 's' ?> loaded.
+                    </div>
+                    <div class="text-muted small">
+                        Use the column filters and pagination controls in the grid.
+                    </div>
+                </div>
+                <div id="gradesTabulator"></div>
             </div>
         </div>
 
@@ -380,7 +312,10 @@ if ($student_result) {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://unpkg.com/tabulator-tables@5.5.0/dist/js/tabulator.min.js"></script>
 <script>
+const gradesData = <?= json_encode($grades_data, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?> || [];
+
 // Auto-fill course title when course code is selected
 document.getElementById('course_code').addEventListener('input', function() {
     const courseCode = this.value;
@@ -423,6 +358,39 @@ function editGrade(studentId, courseCode, year, sem, grade, courseTitle) {
     modal.show();
 }
 
+function archiveGrade(studentId, courseCode, year, sem) {
+    Swal.fire({
+        title: 'Archive Grade Record?',
+        text: 'Are you sure you want to archive this grade record?',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#3085d6',
+        cancelButtonColor: '#d33',
+        confirmButtonText: 'Yes, archive it',
+        cancelButtonText: 'Cancel'
+    }).then((result) => {
+        if (!result.isConfirmed) {
+            return;
+        }
+
+        const formData = new URLSearchParams();
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'studentgrade.php';
+
+        [['archive', '1'], ['student_id', studentId], ['course_code', courseCode], ['year', year], ['sem', sem]].forEach(([name, value]) => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = name;
+            input.value = value;
+            form.appendChild(input);
+        });
+
+        document.body.appendChild(form);
+        form.submit();
+    });
+}
+
 // Reset modal when closed
 document.getElementById('gradeModal').addEventListener('hidden.bs.modal', function () {
     const studentInput = document.getElementById('student_id');
@@ -456,24 +424,81 @@ document.getElementById('gradeForm').addEventListener('submit', function(e) {
     }
 });
 
-// SweetAlert confirmation for archiving
-document.querySelectorAll('.archive-form').forEach(function(form) {
-    form.addEventListener('submit', function(e) {
-        e.preventDefault();
-        Swal.fire({
-            title: 'Archive Grade Record?',
-            text: 'Are you sure you want to archive this grade record?',
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#3085d6',
-            cancelButtonColor: '#d33',
-            confirmButtonText: 'Yes, archive it',
-            cancelButtonText: 'Cancel'
-        }).then((result) => {
-            if (result.isConfirmed) {
-                form.submit();
+document.addEventListener('DOMContentLoaded', function () {
+    const gradesTabulatorEl = document.getElementById('gradesTabulator');
+    if (!gradesTabulatorEl || typeof Tabulator === 'undefined') {
+        return;
+    }
+
+    const gradesTable = new Tabulator(gradesTabulatorEl, {
+        data: gradesData,
+        layout: 'fitColumns',
+        responsiveLayout: 'collapse',
+        pagination: 'local',
+        paginationSize: 10,
+        paginationSizeSelector: [10, 25, 50],
+        placeholder: 'No grades found',
+        height: '560px',
+        rowFormatter: function (row) {
+            const data = row.getData() || {};
+            if (data.row_class) {
+                row.getElement().classList.add(data.row_class);
             }
-        });
+        },
+        columns: [
+            { title: 'Student ID', field: 'student_id', headerFilter: 'input', minWidth: 140 },
+            { title: 'Course Code', field: 'course_code', headerFilter: 'input', minWidth: 140, formatter: 'plaintext' },
+            { title: 'Course Title', field: 'course_title', headerFilter: 'input', minWidth: 220 },
+            { title: 'Year', field: 'year', hozAlign: 'center', width: 100, headerFilter: 'input' },
+            { title: 'Semester', field: 'sem', hozAlign: 'center', width: 110, headerFilter: 'input' },
+            { title: 'Grade', field: 'display_grade', hozAlign: 'center', width: 110, headerFilter: 'input' },
+            {
+                title: 'Status',
+                field: 'status_html',
+                hozAlign: 'center',
+                minWidth: 130,
+                headerSort: false,
+                formatter: function (cell) {
+                    return cell.getValue() || '';
+                }
+            },
+            {
+                title: 'Actions',
+                hozAlign: 'center',
+                width: 150,
+                headerSort: false,
+                formatter: function () {
+                    return '<div class="d-flex justify-content-center gap-2"><button type="button" class="btn btn-sm btn-outline-primary" data-action="edit" title="Edit"><i class="bi bi-pencil"></i></button><button type="button" class="btn btn-sm btn-outline-warning" data-action="archive" title="Archive"><i class="bi bi-archive"></i></button></div>';
+                },
+                cellClick: function (e, cell) {
+                    const target = e.target.closest('button[data-action]');
+                    if (!target) {
+                        return;
+                    }
+
+                    const rowData = cell.getRow().getData() || [];
+                    const action = target.dataset.action;
+
+                    if (action === 'edit') {
+                        editGrade(
+                            rowData.student_id || '',
+                            rowData.course_code || '',
+                            rowData.year || '',
+                            rowData.sem || '',
+                            rowData.final_grade || '',
+                            rowData.course_title || ''
+                        );
+                    } else if (action === 'archive') {
+                        archiveGrade(
+                            rowData.student_id || '',
+                            rowData.course_code || '',
+                            rowData.year || '',
+                            rowData.sem || ''
+                        );
+                    }
+                }
+            },
+        ],
     });
 });
 </script>

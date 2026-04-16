@@ -1,5 +1,11 @@
 <?php
-require_once 'db.php';
+require_once __DIR__ . '/../db_connect.php';
+
+if (!($conn instanceof mysqli)) {
+  throw new RuntimeException('Expected mysqli connection in stuevalr.php');
+}
+
+/** @var mysqli $conn */
 
 // Helpers
 function columnExists(mysqli $conn, string $table, string $column): bool {

@@ -10,6 +10,12 @@ if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role_id'], [2, 10, 11])
 
 require_once '../db_connect.php';
 
+if (!($conn instanceof mysqli)) {
+  throw new RuntimeException('Expected mysqli connection in dashboard2.php');
+}
+
+/** @var mysqli $conn */
+
 // Get unread count (NOW USING HOSTINGER CONNECTION)
 $unread_count = 0;
 
@@ -370,19 +376,7 @@ $conn->close();
         </div>
       </div>
       
-      <!-- Evaluation Dropdown -->
-      <div class="relative">
-        <button id="evaluationDropdownBtn" class="w-full flex justify-between items-center py-2 px-4 rounded bg-blue-500 hover:bg-blue-600 focus:outline-none">
-          Evaluation
-          <svg id="evaluationDropdownIcon" class="w-4 h-4 ml-2 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-          </svg>
-        </button>
-        <div id="evaluationDropdownMenu" class="hidden absolute left-0 w-full z-10 flex flex-col bg-white border border-blue-200 rounded shadow-lg mt-1">
-          <a href="stueval.php" class="py-2 px-6 text-blue-700 hover:bg-blue-100 border-b border-blue-100 first:rounded-t">Evaluate Student</a>
-          <a href="semeva.php" class="py-2 px-6 text-blue-700 hover:bg-blue-100 last:rounded-b">Semestral Evaluation</a>
-        </div>
-      </div>
+      <a href="stueval.php" class="block py-2 px-4 rounded bg-blue-500 hover:bg-blue-600 transition-colors duration-200">Evaluation</a>
       
       <!-- Curriculum Dropdown -->
       <div class="relative">
@@ -756,10 +750,6 @@ $conn->close();
       icon.classList.toggle('rotate-180');
     });
 
-    // Evaluation Dropdown
-    const evalBtn = document.getElementById('evaluationDropdownBtn');
-    const evalMenu = document.getElementById('evaluationDropdownMenu');
-
     // Curriculum Dropdown
     const curriculumBtn = document.getElementById('curriculumDropdownBtn');
     const curriculumMenu = document.getElementById('curriculumDropdownMenu');
@@ -783,23 +773,11 @@ $conn->close();
       fiscalYearMenu.classList.toggle('hidden');
       fiscalYearIcon.classList.toggle('rotate-180');
     });
-    const evalIcon = document.getElementById('evaluationDropdownIcon');
-    
-    evalBtn.addEventListener('click', function(e) {
-      e.preventDefault();
-      evalMenu.classList.toggle('hidden');
-      evalIcon.classList.toggle('rotate-180');
-    });
-
     // Close dropdowns when clicking outside
     document.addEventListener('click', function(event) {
       if (!btn.contains(event.target) && !menu.contains(event.target)) {
         menu.classList.add('hidden');
         icon.classList.remove('rotate-180');
-      }
-      if (!evalBtn.contains(event.target) && !evalMenu.contains(event.target)) {
-        evalMenu.classList.add('hidden');
-        evalIcon.classList.remove('rotate-180');
       }
       if (curriculumBtn && !curriculumBtn.contains(event.target) && !curriculumMenu.contains(event.target)) {
         curriculumMenu.classList.add('hidden');

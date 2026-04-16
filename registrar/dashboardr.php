@@ -90,6 +90,8 @@ if (
     $semesterRaw = $_POST['semester'] ?? '';
     $semester    = (int)$semesterRaw;
     $isLocked    = isset($_POST['is_locked']) ? (int)$_POST['is_locked'] : 1;
+    $lockStartRaw = trim($_POST['lock_start_datetime'] ?? '');
+    $lockEndRaw   = trim($_POST['lock_end_datetime'] ?? '');
 
     if (!in_array($semester, [1, 2], true)) {
         echo json_encode(['success' => false, 'message' => 'Invalid semester selected.']);
@@ -103,6 +105,8 @@ if (
         id INT AUTO_INCREMENT PRIMARY KEY,
         semester TINYINT NOT NULL,
         is_locked TINYINT(1) NOT NULL DEFAULT 0,
+        lock_start_datetime DATETIME NULL,
+        lock_end_datetime DATETIME NULL,
         locked_by INT NULL,
         locked_at TIMESTAMP NULL DEFAULT NULL,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -114,12 +118,47 @@ if (
         exit;
     }
 
+    // Backfill columns for existing tables created before date-range support
+    $hasStartColRes = $conn->query("SHOW COLUMNS FROM semester_locks LIKE 'lock_start_datetime'");
+    if ($hasStartColRes && $hasStartColRes->num_rows === 0) {
+        $conn->query("ALTER TABLE semester_locks ADD COLUMN lock_start_datetime DATETIME NULL AFTER is_locked");
+    }
+    $hasEndColRes = $conn->query("SHOW COLUMNS FROM semester_locks LIKE 'lock_end_datetime'");
+    if ($hasEndColRes && $hasEndColRes->num_rows === 0) {
+        $conn->query("ALTER TABLE semester_locks ADD COLUMN lock_end_datetime DATETIME NULL AFTER lock_start_datetime");
+    }
+
+    $lockStartDb = null;
+    $lockEndDb = null;
+    if ($isLocked === 1) {
+        if ($lockStartRaw === '' || $lockEndRaw === '') {
+            echo json_encode(['success' => false, 'message' => 'Lock start and end date/time are required when locking a semester.']);
+            exit;
+        }
+
+        $lockStartTs = strtotime($lockStartRaw);
+        $lockEndTs = strtotime($lockEndRaw);
+        if ($lockStartTs === false || $lockEndTs === false) {
+            echo json_encode(['success' => false, 'message' => 'Invalid lock date/time format.']);
+            exit;
+        }
+        if ($lockEndTs <= $lockStartTs) {
+            echo json_encode(['success' => false, 'message' => 'Lock end date/time must be after lock start date/time.']);
+            exit;
+        }
+
+        $lockStartDb = date('Y-m-d H:i:s', $lockStartTs);
+        $lockEndDb = date('Y-m-d H:i:s', $lockEndTs);
+    }
+
     $lockedBy = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
 
-    $sql = "INSERT INTO semester_locks (semester, is_locked, locked_by, locked_at)
-            VALUES (?, ?, ?, IF(? = 1, NOW(), NULL))
+        $sql = "INSERT INTO semester_locks (semester, is_locked, lock_start_datetime, lock_end_datetime, locked_by, locked_at)
+                        VALUES (?, ?, ?, ?, ?, IF(? = 1, NOW(), NULL))
             ON DUPLICATE KEY UPDATE
               is_locked = VALUES(is_locked),
+                            lock_start_datetime = VALUES(lock_start_datetime),
+                            lock_end_datetime = VALUES(lock_end_datetime),
               locked_by = VALUES(locked_by),
               locked_at = IF(VALUES(is_locked) = 1, NOW(), NULL)";
 
@@ -129,7 +168,7 @@ if (
         exit;
     }
 
-    $stmt->bind_param('iiii', $semester, $isLocked, $lockedBy, $isLocked);
+    $stmt->bind_param('iissii', $semester, $isLocked, $lockStartDb, $lockEndDb, $lockedBy, $isLocked);
     $ok = $stmt->execute();
     $stmt->close();
 
@@ -147,6 +186,8 @@ if (
         'message'  => $msg,
         'semester' => $semester,
         'is_locked'=> $isLocked,
+        'lock_start_datetime' => $lockStartDb,
+        'lock_end_datetime' => $lockEndDb,
     ]);
     exit;
 }
@@ -175,20 +216,31 @@ try {
 
 // Load current semestral lock states (1st and 2nd semester)
 $semesterLocks = [
-    1 => ['is_locked' => 0],
-    2 => ['is_locked' => 0],
+    1 => ['is_locked' => 0, 'lock_start_datetime' => null, 'lock_end_datetime' => null],
+    2 => ['is_locked' => 0, 'lock_start_datetime' => null, 'lock_end_datetime' => null],
 ];
 
 try {
     $checkLockTable = "SHOW TABLES LIKE 'semester_locks'";
     $resLock = $conn->query($checkLockTable);
     if ($resLock && $resLock->num_rows > 0) {
-        $lockRes = $conn->query("SELECT semester, is_locked FROM semester_locks");
+        $hasStartColRes = $conn->query("SHOW COLUMNS FROM semester_locks LIKE 'lock_start_datetime'");
+        if ($hasStartColRes && $hasStartColRes->num_rows === 0) {
+            $conn->query("ALTER TABLE semester_locks ADD COLUMN lock_start_datetime DATETIME NULL AFTER is_locked");
+        }
+        $hasEndColRes = $conn->query("SHOW COLUMNS FROM semester_locks LIKE 'lock_end_datetime'");
+        if ($hasEndColRes && $hasEndColRes->num_rows === 0) {
+            $conn->query("ALTER TABLE semester_locks ADD COLUMN lock_end_datetime DATETIME NULL AFTER lock_start_datetime");
+        }
+
+        $lockRes = $conn->query("SELECT semester, is_locked, lock_start_datetime, lock_end_datetime FROM semester_locks");
         if ($lockRes) {
             while ($row = $lockRes->fetch_assoc()) {
                 $sem = (int)$row['semester'];
                 if ($sem === 1 || $sem === 2) {
                     $semesterLocks[$sem]['is_locked'] = (int)$row['is_locked'];
+                    $semesterLocks[$sem]['lock_start_datetime'] = $row['lock_start_datetime'] ?? null;
+                    $semesterLocks[$sem]['lock_end_datetime'] = $row['lock_end_datetime'] ?? null;
                 }
             }
         }
@@ -232,14 +284,27 @@ $total_query = "SELECT COUNT(*) as count FROM students_db";
 $total_result = $conn->query($total_query);
 $total_count = $total_result ? (int)$total_result->fetch_assoc()['count'] : 0;
 
-// Count Regular and Irregular students
-$regular_query = "SELECT COUNT(*) as count FROM signin_db WHERE role_id IN (4, 5, 6) AND (classification IS NULL OR classification = '' OR classification = 'Regular')";
+// Count Regular and Irregular students from students_db
+$regular_query = "SELECT COUNT(*) as count FROM students_db WHERE LOWER(TRIM(COALESCE(classification, ''))) = 'regular'";
 $regular_result = $conn->query($regular_query);
 $regular_count = $regular_result ? (int)$regular_result->fetch_assoc()['count'] : 0;
 
-$irregular_query = "SELECT COUNT(*) as count FROM signin_db WHERE role_id IN (4, 5, 6) AND classification = 'Irregular'";
+$irregular_query = "SELECT COUNT(*) as count FROM students_db WHERE LOWER(TRIM(COALESCE(classification, ''))) = 'irregular'";
 $irregular_result = $conn->query($irregular_query);
 $irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['count'] : 0;
+
+// Per-course classification counts for dashboard filtering
+$bsit_regular_result = $conn->query("SELECT COUNT(*) AS count FROM students_db WHERE programs = 'BSIT' AND LOWER(TRIM(COALESCE(classification, ''))) = 'regular'");
+$bsit_regular_count = $bsit_regular_result ? (int)$bsit_regular_result->fetch_assoc()['count'] : 0;
+
+$bsit_irregular_result = $conn->query("SELECT COUNT(*) AS count FROM students_db WHERE programs = 'BSIT' AND LOWER(TRIM(COALESCE(classification, ''))) = 'irregular'");
+$bsit_irregular_count = $bsit_irregular_result ? (int)$bsit_irregular_result->fetch_assoc()['count'] : 0;
+
+$bscs_regular_result = $conn->query("SELECT COUNT(*) AS count FROM students_db WHERE programs = 'BSCS' AND LOWER(TRIM(COALESCE(classification, ''))) = 'regular'");
+$bscs_regular_count = $bscs_regular_result ? (int)$bscs_regular_result->fetch_assoc()['count'] : 0;
+
+$bscs_irregular_result = $conn->query("SELECT COUNT(*) AS count FROM students_db WHERE programs = 'BSCS' AND LOWER(TRIM(COALESCE(classification, ''))) = 'irregular'");
+$bscs_irregular_count = $bscs_irregular_result ? (int)$bscs_irregular_result->fetch_assoc()['count'] : 0;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -432,6 +497,17 @@ $irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['co
                 </div>
             </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; width: 100%; max-width: 1200px;">
+                <div style="grid-column: 1 / -1; background: #ffffff; border-radius: 12px; padding: 12px 16px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05); display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label for="courseFilter" style="font-size: 0.92rem; color: #374151; font-weight: 600;">Filter by course:</label>
+                        <select id="courseFilter" style="padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; color: #1f2937;">
+                            <option value="ALL">All Courses</option>
+                            <option value="BSIT">BSIT</option>
+                            <option value="BSCS">BSCS</option>
+                        </select>
+                    </div>
+                    <div id="courseCountText" style="font-size: 0.92rem; color: #111827; font-weight: 600;">All Courses count: <?php echo $total_count; ?></div>
+                </div>
                 <div class="chart-container" style="margin: 0;">
                     <div class="chart-area">
                         <canvas id="deptBarChart"></canvas>
@@ -481,13 +557,32 @@ $irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['co
                         Lock or unlock actions for each semester. When a semester is locked, related operations in the system can be restricted.
                     </p>
 
+                    <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:14px;">
+                        <label style="font-size:0.9rem; color:#374151;">Lock start date & time</label>
+                        <input type="datetime-local" id="semLockStart" style="padding:8px 10px; border-radius:6px; border:1px solid #d1d5db;" value="<?php
+                            if (!empty($semesterLocks[1]['lock_start_datetime'])) {
+                                echo htmlspecialchars(date('Y-m-d\\TH:i', strtotime($semesterLocks[1]['lock_start_datetime'])));
+                            }
+                        ?>">
+                        <label style="font-size:0.9rem; color:#374151; margin-top:4px;">Lock end date & time</label>
+                        <input type="datetime-local" id="semLockEnd" style="padding:8px 10px; border-radius:6px; border:1px solid #d1d5db;" value="<?php
+                            if (!empty($semesterLocks[1]['lock_end_datetime'])) {
+                                echo htmlspecialchars(date('Y-m-d\\TH:i', strtotime($semesterLocks[1]['lock_end_datetime'])));
+                            }
+                        ?>">
+                    </div>
+
                     <div style="display:flex; flex-direction:column; gap:12px;">
                         <!-- First Semester -->
                         <div style="border:1px solid #e5e7eb; border-radius:8px; padding:10px 12px; display:flex; align-items:center; justify-content:space-between;">
                             <div>
                                 <div style="font-weight:600; color:#111827;">First Semester</div>
                                 <div id="sem1Status" style="font-size:0.85rem; color:#6b7280;">
-                                    Status: <?php echo $semesterLocks[1]['is_locked'] ? 'Locked' : 'Unlocked'; ?>
+                                    Status: <?php echo $semesterLocks[1]['is_locked'] ? 'Locked' : 'Unlocked'; ?><?php
+                                        if (!empty($semesterLocks[1]['is_locked']) && !empty($semesterLocks[1]['lock_start_datetime']) && !empty($semesterLocks[1]['lock_end_datetime'])) {
+                                            echo ' (' . date('M d, Y h:i A', strtotime($semesterLocks[1]['lock_start_datetime'])) . ' - ' . date('M d, Y h:i A', strtotime($semesterLocks[1]['lock_end_datetime'])) . ')';
+                                        }
+                                    ?>
                                 </div>
                             </div>
                             <button
@@ -495,6 +590,8 @@ $irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['co
                                 class="sem-lock-btn"
                                 data-sem="1"
                                 data-locked="<?php echo $semesterLocks[1]['is_locked'] ? '1' : '0'; ?>"
+                                data-lock-start="<?php echo !empty($semesterLocks[1]['lock_start_datetime']) ? htmlspecialchars(date('Y-m-d\\TH:i', strtotime($semesterLocks[1]['lock_start_datetime']))) : ''; ?>"
+                                data-lock-end="<?php echo !empty($semesterLocks[1]['lock_end_datetime']) ? htmlspecialchars(date('Y-m-d\\TH:i', strtotime($semesterLocks[1]['lock_end_datetime']))) : ''; ?>"
                                 style="padding:8px 14px; border-radius:6px; border:none; cursor:pointer; font-weight:600; color:white; background:<?php echo $semesterLocks[1]['is_locked'] ? '#6b7280' : '#2563eb'; ?>;">
                                 <?php echo $semesterLocks[1]['is_locked'] ? 'Unlock' : 'Lock'; ?>
                             </button>
@@ -505,7 +602,11 @@ $irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['co
                             <div>
                                 <div style="font-weight:600; color:#111827;">Second Semester</div>
                                 <div id="sem2Status" style="font-size:0.85rem; color:#6b7280;">
-                                    Status: <?php echo $semesterLocks[2]['is_locked'] ? 'Locked' : 'Unlocked'; ?>
+                                    Status: <?php echo $semesterLocks[2]['is_locked'] ? 'Locked' : 'Unlocked'; ?><?php
+                                        if (!empty($semesterLocks[2]['is_locked']) && !empty($semesterLocks[2]['lock_start_datetime']) && !empty($semesterLocks[2]['lock_end_datetime'])) {
+                                            echo ' (' . date('M d, Y h:i A', strtotime($semesterLocks[2]['lock_start_datetime'])) . ' - ' . date('M d, Y h:i A', strtotime($semesterLocks[2]['lock_end_datetime'])) . ')';
+                                        }
+                                    ?>
                                 </div>
                             </div>
                             <button
@@ -513,6 +614,8 @@ $irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['co
                                 class="sem-lock-btn"
                                 data-sem="2"
                                 data-locked="<?php echo $semesterLocks[2]['is_locked'] ? '1' : '0'; ?>"
+                                data-lock-start="<?php echo !empty($semesterLocks[2]['lock_start_datetime']) ? htmlspecialchars(date('Y-m-d\\TH:i', strtotime($semesterLocks[2]['lock_start_datetime']))) : ''; ?>"
+                                data-lock-end="<?php echo !empty($semesterLocks[2]['lock_end_datetime']) ? htmlspecialchars(date('Y-m-d\\TH:i', strtotime($semesterLocks[2]['lock_end_datetime']))) : ''; ?>"
                                 style="padding:8px 14px; border-radius:6px; border:none; cursor:pointer; font-weight:600; color:white; background:<?php echo $semesterLocks[2]['is_locked'] ? '#6b7280' : '#2563eb'; ?>;">
                                 <?php echo $semesterLocks[2]['is_locked'] ? 'Unlock' : 'Lock'; ?>
                             </button>
@@ -529,6 +632,36 @@ $irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['co
         </div>
     </>
     <script>
+        const classificationByCourse = {
+            ALL: { regular: <?php echo $regular_count; ?>, irregular: <?php echo $irregular_count; ?> },
+            BSIT: { regular: <?php echo $bsit_regular_count; ?>, irregular: <?php echo $bsit_irregular_count; ?> },
+            BSCS: { regular: <?php echo $bscs_regular_count; ?>, irregular: <?php echo $bscs_irregular_count; ?> }
+        };
+
+        const courseCounts = {
+            ALL: <?php echo $total_count; ?>,
+            BSIT: <?php echo $bsit_count; ?>,
+            BSCS: <?php echo $bscs_count; ?>
+        };
+
+        const populationByCourse = {
+            ALL: {
+                labels: ['BSIT', 'BSCS', 'Total Students'],
+                data: [<?php echo $bsit_count; ?>, <?php echo $bscs_count; ?>, <?php echo $total_count; ?>],
+                title: 'Student Population by Department'
+            },
+            BSIT: {
+                labels: ['BSIT'],
+                data: [<?php echo $bsit_count; ?>],
+                title: 'Student Population by Department (BSIT)'
+            },
+            BSCS: {
+                labels: ['BSCS'],
+                data: [<?php echo $bscs_count; ?>],
+                title: 'Student Population by Department (BSCS)'
+            }
+        };
+
         const ctx = document.getElementById('deptBarChart').getContext('2d');
         const deptBarChart = new Chart(ctx, {
             type: 'bar',
@@ -548,6 +681,16 @@ $irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['co
             },
             options: {
                 responsive: true,
+                onClick: function (evt, elements) {
+                    if (!elements || elements.length === 0) return;
+                    const index = elements[0].index;
+                    const clickedLabel = this.data.labels[index] || '';
+                    if (clickedLabel === 'BSIT' || clickedLabel === 'BSCS') {
+                        applyCourseFilter(clickedLabel);
+                    } else {
+                        applyCourseFilter('ALL');
+                    }
+                },
                 plugins: {
                     legend: { display: false },
                     title: {
@@ -602,6 +745,45 @@ $irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['co
                 }
             }
         });
+
+        const courseFilter = document.getElementById('courseFilter');
+        const courseCountText = document.getElementById('courseCountText');
+
+        function applyCourseFilter(course) {
+            const selectedCourse = classificationByCourse[course] ? course : 'ALL';
+            const selectedData = classificationByCourse[selectedCourse];
+            const selectedPopulation = populationByCourse[selectedCourse] || populationByCourse.ALL;
+
+            deptBarChart.data.labels = selectedPopulation.labels;
+            deptBarChart.data.datasets[0].data = selectedPopulation.data;
+            deptBarChart.options.plugins.title.text = selectedPopulation.title;
+            deptBarChart.update();
+
+            classificationBarChart.data.datasets[0].data = [selectedData.regular, selectedData.irregular];
+            classificationBarChart.options.plugins.title.text =
+                selectedCourse === 'ALL'
+                    ? 'Student Classification Distribution'
+                    : 'Student Classification Distribution (' + selectedCourse + ')';
+            classificationBarChart.update();
+
+            if (courseFilter) {
+                courseFilter.value = selectedCourse;
+            }
+
+            if (courseCountText) {
+                if (selectedCourse === 'ALL') {
+                    courseCountText.textContent = 'All Courses count: ' + courseCounts.ALL;
+                } else {
+                    courseCountText.textContent = selectedCourse + ' count: ' + courseCounts[selectedCourse];
+                }
+            }
+        }
+
+        if (courseFilter) {
+            courseFilter.addEventListener('change', function () {
+                applyCourseFilter(this.value);
+            });
+        }
 
         // Enrollment Period modal logic
         const enrollmentLink = document.getElementById('enrollmentPeriodLink');
@@ -700,6 +882,8 @@ $irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['co
         const semLockModal = document.getElementById('semLockModal');
         const semLockCloseBtn = document.getElementById('semLockCloseBtn');
         const semLockMessage = document.getElementById('semLockMessage');
+        const semLockStartInput = document.getElementById('semLockStart');
+        const semLockEndInput = document.getElementById('semLockEnd');
 
         function openSemLockModal() {
             if (semLockModal) {
@@ -738,15 +922,39 @@ $irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['co
             });
         }
 
-        function updateSemLockUI(sem, isLocked) {
+        function formatDateRangeForStatus(start, end) {
+            if (!start || !end) return '';
+
+            const startDate = new Date(start);
+            const endDate = new Date(end);
+            if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return '';
+
+            const dateOptions = {
+                month: 'short',
+                day: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            };
+            return ' (' + startDate.toLocaleString('en-US', dateOptions) + ' - ' + endDate.toLocaleString('en-US', dateOptions) + ')';
+        }
+
+        function updateSemLockUI(sem, isLocked, lockStart, lockEnd) {
             const statusEl = document.getElementById(sem === 1 ? 'sem1Status' : 'sem2Status');
             const btn = document.querySelector('.sem-lock-btn[data-sem="' + sem + '"]');
             if (!btn || !statusEl) return;
 
             btn.dataset.locked = isLocked ? '1' : '0';
+            btn.dataset.lockStart = lockStart || '';
+            btn.dataset.lockEnd = lockEnd || '';
             btn.textContent = isLocked ? 'Unlock' : 'Lock';
             btn.style.background = isLocked ? '#6b7280' : '#2563eb';
-            statusEl.textContent = 'Status: ' + (isLocked ? 'Locked' : 'Unlocked');
+            statusEl.textContent = 'Status: ' + (isLocked ? 'Locked' : 'Unlocked') + (isLocked ? formatDateRangeForStatus(lockStart, lockEnd) : '');
+
+            if (semLockStartInput && semLockEndInput) {
+                semLockStartInput.value = lockStart || '';
+                semLockEndInput.value = lockEnd || '';
+            }
         }
 
         const semLockButtons = document.querySelectorAll('.sem-lock-btn');
@@ -755,11 +963,23 @@ $irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['co
                 const sem = parseInt(btn.dataset.sem, 10);
                 const currentlyLocked = btn.dataset.locked === '1';
                 const newStatus = currentlyLocked ? 0 : 1;
+                const lockStartVal = semLockStartInput ? semLockStartInput.value : '';
+                const lockEndVal = semLockEndInput ? semLockEndInput.value : '';
+
+                if (newStatus === 1 && (!lockStartVal || !lockEndVal)) {
+                    if (semLockMessage) {
+                        semLockMessage.textContent = 'Please provide lock start and end date/time before locking.';
+                        semLockMessage.style.display = 'block';
+                    }
+                    return;
+                }
 
                 const formData = new URLSearchParams();
                 formData.append('action', 'toggle_sem_lock');
                 formData.append('semester', String(sem));
                 formData.append('is_locked', String(newStatus));
+                formData.append('lock_start_datetime', newStatus === 1 ? lockStartVal : '');
+                formData.append('lock_end_datetime', newStatus === 1 ? lockEndVal : '');
 
                 if (semLockMessage) {
                     semLockMessage.style.display = 'none';
@@ -789,7 +1009,9 @@ $irregular_count = $irregular_result ? (int)$irregular_result->fetch_assoc()['co
                         }
                     } else {
                         const isLocked = data.is_locked === 1 || data.is_locked === '1';
-                        updateSemLockUI(sem, isLocked);
+                        const lockStart = isLocked ? (data.lock_start_datetime || lockStartVal || '') : '';
+                        const lockEnd = isLocked ? (data.lock_end_datetime || lockEndVal || '') : '';
+                        updateSemLockUI(sem, isLocked, lockStart, lockEnd);
 
                         if (window.Swal) {
                             Swal.fire({

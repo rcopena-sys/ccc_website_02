@@ -77,8 +77,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $email = $_SESSION['reset_email'];
             $new_password = password_hash($_POST['new_password'], PASSWORD_DEFAULT);
             
-            // Update password and clear failed login attempts so the user can log in again
-            $stmt = $conn->prepare("UPDATE signin_db SET password = ?, failed_attempts = 0, last_failed_attempt = NULL WHERE email = ?");
+            // Update password, unlock account, and clear failed attempts.
+            $stmt = $conn->prepare("UPDATE signin_db
+                SET password = ?,
+                    failed_attempts = 0,
+                    last_failed_attempt = NULL,
+                    status = 'active'
+                WHERE email = ?");
             $stmt->bind_param("ss", $new_password, $email);
             
             if ($stmt->execute()) {
