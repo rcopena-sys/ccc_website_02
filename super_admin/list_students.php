@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Super Admin - Student List</title>
+    <link href="https://unpkg.com/tabulator-tables@6.2.5/dist/css/tabulator.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/tabulator-tables@6.2.5/dist/js/tabulator.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         
@@ -306,6 +309,33 @@
             transform: translateY(-2px);
             box-shadow: 0 8px 20px rgba(72, 187, 120, 0.4);
         }
+
+        #studentsTable {
+            margin-top: 10px;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+            background: rgba(255,255,255,0.9);
+        }
+
+        .tabulator {
+            border: 1px solid rgba(30, 58, 138, 0.15);
+            background: rgba(255,255,255,0.9);
+        }
+
+        .tabulator .tabulator-header {
+            background: linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 100%);
+            border-bottom: none;
+        }
+
+        .tabulator .tabulator-header .tabulator-col {
+            background: transparent;
+            color: #fff;
+        }
+
+        .tabulator .tabulator-footer {
+            background: rgba(255,255,255,0.95);
+        }
         
     </style>
 </head>
@@ -347,15 +377,15 @@
                 <form id="createAccountForm" onsubmit="createStudentAccount(event)">
                     <div class="form-group">
                         <label for="createStudentId">Student ID</label>
-                        <input type="text" id="createStudentId" name="student_id" required>
+                        <input type="text" id="createStudentId" name="student_id" required readonly>
                     </div>
                     <div class="form-group">
                         <label for="createStudentName">Student Name</label>
-                        <input type="text" id="createStudentName" name="student_name" required>
+                        <input type="text" id="createStudentName" name="student_name" required readonly>
                     </div>
                     <div class="form-group">
                         <label for="createEmail">Email</label>
-                        <input type="email" id="createEmail" name="email" required>
+                        <input type="email" id="createEmail" name="email" required readonly>
                     </div>
                     <div class="form-group" style="background: #f0f9ff; border-left: 4px solid #2563eb; padding: 12px; border-radius: 8px;">
                         <div style="color:#1e40af; font-weight:600; margin-bottom:6px;">Password</div>
@@ -363,12 +393,8 @@
                     </div>
                     <div class="form-group">
                         <label for="createRole">Role</label>
-                        <select id="createRole" name="role" required>
-                            <option value="">Select Role</option>
-                            <option value="Student">Student</option>
-                            <option value="BSIT">BSIT</option>
-                            <option value="BSCS">BSCS</option>
-                        </select>
+                        <input type="hidden" id="createRole" name="role" required>
+                        <input type="text" id="createRoleDisplay" value="" readonly style="background: #f8fafc; cursor: not-allowed;">
                     </div>
                     <div class="modal-actions">
                         <button type="submit" class="add-curriculum-btn">Create Account</button>
@@ -468,6 +494,11 @@
                 outline: none;
                 border-color: #1e3a8a;
             }
+
+            .form-group input[readonly] {
+                background: #f8fafc;
+                cursor: not-allowed;
+            }
         </style>
         <?php
         require_once __DIR__ . '/../db_connect.php';
@@ -542,23 +573,25 @@
 
         $result = $conn->query($sql);
         if ($result && $result->num_rows > 0) {
-            echo '<table>';
-            echo '<tr><th>Name</th><th>Email</th><th>Student ID</th><th>Course</th><th>Classification</th><th>Role</th><th>Curriculum</th><th>Action</th></tr>';
+            $studentsData = [];
             while($row = $result->fetch_assoc()) {
-                echo '<tr class="student-row" onclick="createAccountFromRow(\'' . htmlspecialchars($row['student_id']) . '\', \'' . htmlspecialchars($row['student_name']) . '\', \'' . htmlspecialchars($row['email']) . '\', \'' . htmlspecialchars($row['course']) . '\')" style="cursor: pointer;">';
-                echo '<td>' . htmlspecialchars($row['student_name']) . '</td>';
-                echo '<td>' . htmlspecialchars($row['email']) . '</td>';
-                echo '<td>' . htmlspecialchars(formatStudentId($row['student_id'])) . '</td>';
-                echo '<td>' . htmlspecialchars($row['course']) . '</td>';
-                echo '<td>' . htmlspecialchars($row['classification'] ?? 'N/A') . '</td>';
-                echo '<td>' . htmlspecialchars($row['role_name']) . '</td>';
-                echo '<td>' . htmlspecialchars($row['curriculum'] ?? 'N/A') . '</td>';
-                echo '<td><span style="color: #2563eb; font-weight: 600; cursor: pointer;" title="Click to create account with auto-generated password" onclick="event.stopPropagation(); openCreateAccountModalPrefill(\'' . htmlspecialchars($row['student_id']) . '\', \'' . htmlspecialchars($row['student_name']) . '\', \'' . htmlspecialchars($row['email']) . '\', \'' . htmlspecialchars($row['course']) . '\')">Create Account</span></td>';
-                echo '</tr>';
+                $studentsData[] = [
+                    'student_name' => (string)($row['student_name'] ?? ''),
+                    'email' => (string)($row['email'] ?? ''),
+                    'student_id' => (string)($row['student_id'] ?? ''),
+                    'student_id_formatted' => formatStudentId((string)($row['student_id'] ?? '')),
+                    'course' => (string)($row['course'] ?? ''),
+                    'classification' => (string)($row['classification'] ?? 'N/A'),
+                    'role_name' => (string)($row['role_name'] ?? 'Student'),
+                    'curriculum' => (string)($row['curriculum'] ?? 'N/A')
+                ];
             }
-            echo '</table>';
+
+            echo '<div id="studentsTable"></div>';
+            echo '<script>window.studentsTableData = ' . json_encode($studentsData, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>';
         } else {
             echo '<p>No students found.</p>';
+            echo '<script>window.studentsTableData = [];</script>';
         }
 
         $conn->close();
@@ -566,39 +599,104 @@
     </div>
 </div>
 <script>
+    var studentsTabulator = null;
+
+    function escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function initializeStudentsTable() {
+        var tableEl = document.getElementById('studentsTable');
+        if (!tableEl || typeof Tabulator === 'undefined') return;
+
+        var tableData = Array.isArray(window.studentsTableData) ? window.studentsTableData : [];
+        studentsTabulator = new Tabulator('#studentsTable', {
+            data: tableData,
+            layout: 'fitColumns',
+            responsiveLayout: 'collapse',
+            pagination: true,
+            paginationMode: 'local',
+            paginationSize: 10,
+            paginationSizeSelector: [10, 20, 50, 100],
+            movableColumns: true,
+            columns: [
+                { title: 'Name', field: 'student_name', minWidth: 180 },
+                { title: 'Email', field: 'email', minWidth: 220 },
+                { title: 'Student ID', field: 'student_id_formatted', minWidth: 130 },
+                { title: 'Course', field: 'course', minWidth: 110 },
+                { title: 'Classification', field: 'classification', minWidth: 140 },
+                { title: 'Role', field: 'role_name', minWidth: 100 },
+                { title: 'Curriculum', field: 'curriculum', minWidth: 130 },
+                {
+                    title: 'Action',
+                    field: 'action',
+                    hozAlign: 'center',
+                    headerHozAlign: 'center',
+                    minWidth: 140,
+                    formatter: function() {
+                        return '<span style="color: #2563eb; font-weight: 600; cursor: pointer;">Create Account</span>';
+                    },
+                    cellClick: function(e, cell) {
+                        e.stopPropagation();
+                        var row = cell.getRow().getData();
+                        openCreateAccountModalPrefill(row.student_id, row.student_name, row.email, row.course);
+                    }
+                }
+            ],
+            rowClick: function(e, row) {
+                var data = row.getData();
+                createAccountFromRow(data.student_id, data.student_name, data.email, data.course);
+            }
+        });
+    }
+
     // Dropdown functionality
     const btn = document.getElementById('studentDropdownBtn');
     const menu = document.getElementById('studentDropdownMenu');
-    btn.addEventListener('click', function(e) {
-        e.preventDefault();
-        menu.style.display = menu.style.display === 'flex' ? 'none' : 'flex';
-    });
+    if (btn && menu) {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            menu.style.display = menu.style.display === 'flex' ? 'none' : 'flex';
+        });
+    }
     document.addEventListener('click', function(event) {
-        if (!btn.contains(event.target) && !menu.contains(event.target)) {
+        if (btn && menu && !btn.contains(event.target) && !menu.contains(event.target)) {
             menu.style.display = 'none';
         }
     });
+
     // Search functionality
     function search() {
         var input = document.getElementById('searchInput');
         var filter = input.value.toLowerCase();
-        var rows = document.getElementsByClassName('student-row');
-
-        for (var i = 0; i < rows.length; i++) {
-            var name = rows[i].getElementsByTagName('td')[1].textContent.toLowerCase();
-            var id = rows[i].getElementsByTagName('td')[0].textContent.toLowerCase();
-            var email = rows[i].getElementsByTagName('td')[2].textContent.toLowerCase();
-            var studentId = rows[i].getElementsByTagName('td')[3].textContent.toLowerCase();
-            var course = rows[i].getElementsByTagName('td')[4].textContent.toLowerCase();
-            
-            if (name.indexOf(filter) > -1 || id.indexOf(filter) > -1 || 
-                email.indexOf(filter) > -1 || studentId.indexOf(filter) > -1 || 
-                course.indexOf(filter) > -1) {
-                rows[i].style.display = '';
-            } else {
-                rows[i].style.display = 'none';
-            }
+        if (!studentsTabulator) {
+            return;
         }
+
+        if (!filter) {
+            studentsTabulator.clearFilter(true);
+            return;
+        }
+
+        studentsTabulator.setFilter(function(data) {
+            var searchable = [
+                data.student_name,
+                data.email,
+                data.student_id,
+                data.student_id_formatted,
+                data.course,
+                data.classification,
+                data.role_name,
+                data.curriculum
+            ].join(' ').toLowerCase();
+
+            return searchable.indexOf(filter) !== -1;
+        });
     }
     // Modal functionality
     var modal = document.getElementById('studentModal');
@@ -607,155 +705,41 @@
     
     // Create account directly from row click
     function createAccountFromRow(studentId, studentName, email, course) {
-        // Test connection first
-        fetch('./debug_connection.php')
-        .then(response => response.json())
-        .then(debugData => {
-            console.log('Connection Test Result:', debugData);
-            
-            if (!debugData.success) {
-                alert('Server connection test failed. Please check server configuration.');
-                return;
-            }
-            
-            // Check if student already has an account
-            fetch('check_student_account.php?student_id=' + encodeURIComponent(studentId) + '&email=' + encodeURIComponent(email))
-            .then(response => response.json())
-            .then(data => {
-                if (data.hasAccount) {
-                    alert('Student already has an account in signin_db');
-                    return;
-                }
-                
-                // Get role from course
-                let role = course;
-                if (course.toLowerCase().includes('bsit')) {
-                    role = 'BSIT';
-                } else if (course.toLowerCase().includes('bscs')) {
-                    role = 'BSCS';
-                } else {
-                    role = 'Student';
-                }
-                
-                // Confirm account creation
-                const confirmCreate = confirm('Create account for ' + studentName + ' with email: ' + email + '?\n\nUsername: ' + email.split('@')[0] + '\nRole: ' + role + '\n\nPassword will be auto-generated and sent to their email.');
-                if (!confirmCreate) return;
-                
-                // Create account with auto-generated username and password
-                const formData = new FormData();
-                formData.append('student_id', studentId);
-                formData.append('student_name', studentName);
-                formData.append('email', email);
-                formData.append('role', role);
-                // Username and password will be auto-generated in handler
-                
-                console.log('Sending request to create_student_account_handler.php with data:', {
-                    student_id: studentId,
-                    student_name: studentName,
-                    email: email,
-                    role: role
-                });
-                
-                fetch('create_student_account_handler.php', {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => {
-                    console.log('Response status:', response.status);
-                    console.log('Response headers:', response.headers);
-                    return response.json();
-                })
-                .then(data => {
-                    console.log('Server Response:', data);
-                    if (data.success) {
-                        let message = 'Account created successfully for ' + studentName + '!\n\n';
-                        message += 'Username: ' + (data.username || '[Auto-generated and sent via email]') + '\n';
-                        message += 'Password: ' + (data.password || '[Auto-generated and sent via email]') + '\n';
-                        message += 'Role: ' + role + '\n\n';
-                        message += data.message;
-                        alert(message);
-                        // Optionally refresh page to update list
-                        location.reload();
-                    } else {
-                        alert('Error creating account: ' + data.message);
-                        console.error('Server Response:', data);
-                        console.error('Error Details:', {
-                            studentId: studentId,
-                            studentName: studentName,
-                            email: email,
-                            role: role,
-                            response: data
-                        });
-                    }
-                })
-                .catch(error => {
-                    console.error('Network Error:', error);
-                    console.error('Error Details:', {
-                        studentId: studentId,
-                        studentName: studentName,
-                        email: email,
-                        role: role,
-                        error: error
-                    });
-                    alert('Network error occurred while creating the account. Please check console for details.');
-                });
-            })
-            .catch(error => {
-                console.error('Error checking account:', error);
-                // If check fails, proceed with account creation anyway
-                createAccountDirectly(studentId, studentName, email, course);
+        const role = getRoleFromCourse(course);
+        const username = email.split('@')[0];
+
+        if (typeof Swal !== 'undefined') {
+            Swal.fire({
+                title: 'Create account?',
+                html: `
+                    <div style="text-align:left; line-height:1.6;">
+                        <div><strong>Name:</strong> ${escapeHtml(studentName)}</div>
+                        <div><strong>Email:</strong> ${escapeHtml(email)}</div>
+                        <div><strong>Username:</strong> ${escapeHtml(username)}</div>
+                        <div><strong>Role:</strong> ${escapeHtml(role)}</div>
+                        <div class="mt-2">Password will be auto-generated and sent to the student.</div>
+                    </div>
+                `,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'Create Account',
+                cancelButtonText: 'Cancel'
+            }).then((result) => {
+                if (!result.isConfirmed) return;
+                submitCreateStudentAccount(studentId, studentName, email, role);
             });
-        })
-        .catch(error => {
-            console.error('Connection Test Failed:', error);
-            alert('Failed to connect to server. Please check your internet connection and server status.');
-        });
+            return;
+        }
+
+        if (confirm('Create account for ' + studentName + ' with email: ' + email + '?\n\nUsername: ' + username + '\nRole: ' + role + '\n\nPassword will be auto-generated and sent to their email.')) {
+            submitCreateStudentAccount(studentId, studentName, email, role);
+        }
     }
     
     // Fallback function to create account directly
     function createAccountDirectly(studentId, studentName, email, course) {
-        // Get role from course
-        let role = course;
-        if (course.toLowerCase().includes('bsit')) {
-            role = 'BSIT';
-        } else if (course.toLowerCase().includes('bscs')) {
-            role = 'BSCS';
-        } else {
-            role = 'Student';
-        }
-        
-        const confirmCreate = confirm('Create account for ' + studentName + ' with email: ' + email + '?\n\nUsername: ' + email.split('@')[0] + '\nRole: ' + role + '\n\nPassword will be auto-generated and sent to their email.');
-        if (!confirmCreate) return;
-        
-        const formData = new FormData();
-        formData.append('student_id', studentId);
-        formData.append('student_name', studentName);
-        formData.append('email', email);
-        formData.append('role', role);
-        // Username and password will be auto-generated in handler
-        
-        fetch('create_student_account_handler.php', {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                let message = 'Account created successfully for ' + studentName + '!\n\n';
-                message += 'Username: ' + (data.username || '[Auto-generated and sent via email]') + '\n';
-                message += 'Password: ' + (data.password || '[Auto-generated and sent via email]') + '\n';
-                message += 'Role: ' + role + '\n\n';
-                message += data.message;
-                alert(message);
-                location.reload();
-            } else {
-                alert('Error creating account: ' + data.message);
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('An error occurred while creating the account.');
-        });
+        const role = getRoleFromCourse(course);
+        submitCreateStudentAccount(studentId, studentName, email, role);
     }
     
     // Show modal with student info
@@ -815,6 +799,7 @@
         if ((course || '').toLowerCase().includes('bsit')) roleGuess = 'BSIT';
         else if ((course || '').toLowerCase().includes('bscs')) roleGuess = 'BSCS';
         document.getElementById('createRole').value = roleGuess;
+        document.getElementById('createRoleDisplay').value = roleGuess;
     }
     
     function closeCreateAccountModal() {
@@ -823,10 +808,32 @@
     
     function createStudentAccount(event) {
         event.preventDefault();
-        
-        const formData = new FormData(document.getElementById('createAccountForm'));
-        
-        // Send data to server
+
+        var formData = new FormData(document.getElementById('createAccountForm'));
+        submitCreateAccountForm(formData);
+    }
+
+    function getRoleFromCourse(course) {
+        var value = String(course || '');
+        if (value.toLowerCase().includes('bsit')) {
+            return 'BSIT';
+        }
+        if (value.toLowerCase().includes('bscs')) {
+            return 'BSCS';
+        }
+        return 'Student';
+    }
+
+    function submitCreateStudentAccount(studentId, studentName, email, role) {
+        var formData = new FormData();
+        formData.append('student_id', studentId);
+        formData.append('student_name', studentName);
+        formData.append('email', email);
+        formData.append('role', role);
+        submitCreateAccountForm(formData, studentName);
+    }
+
+    function submitCreateAccountForm(formData, studentName) {
         fetch('create_student_account_handler.php', {
             method: 'POST',
             body: formData
@@ -834,17 +841,45 @@
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                alert('Account created successfully!');
                 closeCreateAccountModal();
-                // Optionally refresh the page or update the student list
-                location.reload();
+                if (typeof Swal !== 'undefined') {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Account Created',
+                        text: studentName ? ('Account created successfully for ' + studentName + '.') : 'Account created successfully.',
+                        confirmButtonText: 'OK'
+                    }).then(() => {
+                        location.reload();
+                    });
+                } else {
+                    alert(studentName ? ('Account created successfully for ' + studentName + '!') : 'Account created successfully!');
+                    location.reload();
+                }
             } else {
-                alert('Error: ' + data.message);
+                if (typeof Swal !== 'undefined') {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Create Failed',
+                        text: data.message || 'Error creating account.',
+                        confirmButtonText: 'OK'
+                    });
+                } else {
+                    alert('Error: ' + data.message);
+                }
             }
         })
         .catch(error => {
             console.error('Error:', error);
-            alert('An error occurred while creating the account.');
+            if (typeof Swal !== 'undefined') {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Network Error',
+                    text: 'An error occurred while creating the account.',
+                    confirmButtonText: 'OK'
+                });
+            } else {
+                alert('An error occurred while creating the account.');
+            }
         });
     }
     
@@ -866,7 +901,10 @@
     setInterval(updateClock, 1000);
 
     // Initial clock update
-    document.addEventListener('DOMContentLoaded', updateClock);
+    document.addEventListener('DOMContentLoaded', function() {
+        updateClock();
+        initializeStudentsTable();
+    });
 </script>
 </body>
 </html>

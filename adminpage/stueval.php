@@ -28,6 +28,10 @@ function isRegularStudent($studentData) {
     return in_array($classification, $regularClassifications);
 }
 
+  function isIrregularClassification(string $classification): bool {
+    return preg_match('/\birregular\b/i', trim($classification)) === 1;
+  }
+
 // Check if a student should be classified as irregular
 function checkIrregularStatus($conn, $studentId, $currentYear, $currentSem) {
     // Check regular courses
@@ -211,19 +215,96 @@ function columnExists(mysqli $conn, string $table, string $column): bool {
 
 function normalizeSemesterKey(string $raw): string {
     $raw = strtolower(trim($raw));
-    $raw = str_replace(['first','second','third','fourth','1st','2nd','3rd','4th'], ['1','2','3','4','1','2','3','4'], $raw);
+  $raw = str_replace(['first','second','third','fourth','fifth','1st','2nd','3rd','4th','5th'], ['1','2','3','4','5','1','2','3','4','5'], $raw);
     $raw = str_replace(['year','yr','semester','sem',' ', '-'], '', $raw);
-    if (preg_match('/^([1-4])([1-2])$/', $raw, $m)) {
+  if (preg_match('/^([1-5])([1-2])$/', $raw, $m)) {
         return $m[1] . '-' . $m[2];
     }
-    if (preg_match('/^[1-4]-[1-2]$/', $raw)) return $raw;
+  if (preg_match('/^[1-5]-[1-2]$/', $raw)) return $raw;
     return $raw;
 }
+
+  function parseYearLevelNumber(string $raw): ?int {
+    $val = strtolower(trim($raw));
+    if ($val === '') {
+      return null;
+    }
+
+    if (preg_match('/\b([1-5])\b/', $val, $m)) {
+      return (int)$m[1];
+    }
+
+    if (preg_match('/\b([1-5])(st|nd|rd|th)\b/', $val, $m)) {
+      return (int)$m[1];
+    }
+
+    if (strpos($val, 'first') !== false) return 1;
+    if (strpos($val, 'second') !== false) return 2;
+    if (strpos($val, 'third') !== false) return 3;
+    if (strpos($val, 'fourth') !== false) return 4;
+    if (strpos($val, 'fifth') !== false) return 5;
+
+    return null;
+  }
+
+  function parseSemesterNumber(string $raw): ?int {
+    $val = strtolower(trim($raw));
+    if ($val === '') {
+      return null;
+    }
+
+    if (preg_match('/\b([1-2])\b/', $val, $m)) {
+      return (int)$m[1];
+    }
+
+    if (preg_match('/\b([1-2])(st|nd)\b/', $val, $m)) {
+      return (int)$m[1];
+    }
+
+    if (strpos($val, 'first') !== false) return 1;
+    if (strpos($val, 'second') !== false) return 2;
+
+    return null;
+  }
 
 function normalizeCourseCode(string $code): string {
     // Uppercase and strip all non-alphanumeric to match 'ALG 101' with 'ALG101' etc.
     $upper = strtoupper(trim($code));
     return preg_replace('/[^A-Z0-9]/', '', $upper);
+}
+
+function deletedAutoloadBlockKey(string $courseCode, int $year, int $sem): string {
+  return normalizeCourseCode($courseCode) . '|' . $year . '-' . $sem;
+}
+
+function markDeletedAutoloadBlock(string $studentId, string $courseCode, int $year, int $sem): void {
+  if ($studentId === '' || $year <= 0 || $sem <= 0) {
+    return;
+  }
+  if (!isset($_SESSION['deleted_irregular_autoload_blocks']) || !is_array($_SESSION['deleted_irregular_autoload_blocks'])) {
+    $_SESSION['deleted_irregular_autoload_blocks'] = [];
+  }
+  if (!isset($_SESSION['deleted_irregular_autoload_blocks'][$studentId]) || !is_array($_SESSION['deleted_irregular_autoload_blocks'][$studentId])) {
+    $_SESSION['deleted_irregular_autoload_blocks'][$studentId] = [];
+  }
+  $_SESSION['deleted_irregular_autoload_blocks'][$studentId][deletedAutoloadBlockKey($courseCode, $year, $sem)] = true;
+}
+
+function isDeletedAutoloadBlocked(string $studentId, string $courseCode, int $year, int $sem): bool {
+  if ($studentId === '' || $year <= 0 || $sem <= 0) {
+    return false;
+  }
+  $key = deletedAutoloadBlockKey($courseCode, $year, $sem);
+  return !empty($_SESSION['deleted_irregular_autoload_blocks'][$studentId][$key]);
+}
+
+function clearDeletedAutoloadBlocks(string $studentId): void {
+  if ($studentId === '') {
+    return;
+  }
+  if (isset($_SESSION['deleted_irregular_autoload_blocks'][$studentId])) {
+    unset($_SESSION['deleted_irregular_autoload_blocks'][$studentId]);
+  }
 }
 
 function latestFiscalYear(mysqli $conn, string $program): ?string {
@@ -244,6 +325,115 @@ function latestFiscalYear(mysqli $conn, string $program): ?string {
 // Add back inline grade edit support
 function gradeColumn(mysqli $conn): string {
     return columnExists($conn, 'grades_db', 'final_grade') ? 'final_grade' : 'grade';
+}
+
+function isFailedGradeForClassification($gradeValue): bool {
+  if ($gradeValue === null || $gradeValue === '') {
+    return false;
+  }
+
+  if (is_numeric($gradeValue)) {
+    return (float)$gradeValue >= 5.00;
+  }
+
+  $txt = strtoupper(trim((string)$gradeValue));
+  return in_array($txt, ['FAILED', 'FAIL'], true);
+}
+
+function calculateFailedUnitsForStudent(mysqli $conn, string $studentId): float {
+  if ($studentId === '') {
+    return 0.0;
+  }
+
+  $codeCol = columnExists($conn, 'curriculum', 'course_code') ? 'course_code' : 'course_code';
+  $totalCol = columnExists($conn, 'curriculum', 'total_units')
+    ? 'total_units'
+    : (columnExists($conn, 'curriculum', 'units') ? 'units' : null);
+  $lecCol = columnExists($conn, 'curriculum', 'lec_units')
+    ? 'lec_units'
+    : (columnExists($conn, 'curriculum', 'lecture_units') ? 'lecture_units' : null);
+  $labCol = columnExists($conn, 'curriculum', 'lab_units') ? 'lab_units' : null;
+
+  $unitsByCode = [];
+  $currSql = "SELECT {$codeCol} AS course_code";
+  if ($totalCol !== null) {
+    $currSql .= ", {$totalCol} AS total_units";
+  } else {
+    $currSql .= ", NULL AS total_units";
+  }
+  if ($lecCol !== null) {
+    $currSql .= ", {$lecCol} AS lec_units";
+  } else {
+    $currSql .= ", 0 AS lec_units";
+  }
+  if ($labCol !== null) {
+    $currSql .= ", {$labCol} AS lab_units";
+  } else {
+    $currSql .= ", 0 AS lab_units";
+  }
+  $currSql .= " FROM curriculum";
+
+  $currRes = $conn->query($currSql);
+  if ($currRes instanceof mysqli_result) {
+    while ($row = $currRes->fetch_assoc()) {
+      $code = trim((string)($row['course_code'] ?? ''));
+      if ($code === '') {
+        continue;
+      }
+      $norm = normalizeCourseCode($code);
+      $units = (float)($row['total_units'] ?? 0);
+      if ($units <= 0) {
+        $units = (float)($row['lec_units'] ?? 0) + (float)($row['lab_units'] ?? 0);
+      }
+      if (!isset($unitsByCode[$norm]) || $unitsByCode[$norm] <= 0) {
+        $unitsByCode[$norm] = $units;
+      }
+    }
+  }
+
+  $gradeCol = gradeColumn($conn);
+  $sql = "SELECT course_code, {$gradeCol} AS grade_value, year, sem FROM grades_db WHERE student_id = ? ORDER BY year DESC, sem DESC";
+  $stmt = $conn->prepare($sql);
+  if (!$stmt) {
+    return 0.0;
+  }
+
+  $stmt->bind_param('s', $studentId);
+  $stmt->execute();
+  $res = $stmt->get_result();
+
+  $latestByCourse = [];
+  while ($row = $res->fetch_assoc()) {
+    $code = trim((string)($row['course_code'] ?? ''));
+    if ($code === '') {
+      continue;
+    }
+    $norm = normalizeCourseCode($code);
+    if (!array_key_exists($norm, $latestByCourse)) {
+      $latestByCourse[$norm] = $row['grade_value'] ?? null;
+    }
+  }
+  $stmt->close();
+
+  $failedUnits = 0.0;
+  foreach ($latestByCourse as $norm => $gradeValue) {
+    if (!isFailedGradeForClassification($gradeValue)) {
+      continue;
+    }
+    $failedUnits += (float)($unitsByCode[$norm] ?? 0.0);
+  }
+
+  return round($failedUnits, 2);
+}
+
+function classificationByFailedUnits(float $failedUnits): ?string {
+  if ($failedUnits >= 6.25) {
+    return 'Dismissal';
+  }
+  if ($failedUnits >= 6.00) {
+    return 'Probationary';
+  }
+  return null;
 }
 
 function isGradePassingForPromotion($gradeValue): bool {
@@ -272,6 +462,182 @@ function isSubjectPassedForYearPromotion(string $courseCode, array $gradesByCode
   $gradeValue = $gradesByCode[$norm] ?? ($gradesByCode[$courseCode] ?? null);
 
   return isGradePassingForPromotion($gradeValue);
+}
+
+function mapIrregularStatusFromGrade($gradeValue): string {
+  if ($gradeValue === null || $gradeValue === '') {
+    return 'enrolled';
+  }
+
+  if (is_numeric($gradeValue)) {
+    $gv = (float)$gradeValue;
+    if ($gv <= 3.25) {
+      return 'completed';
+    }
+    if ($gv >= 5.00) {
+      return 'failed';
+    }
+    return 'enrolled';
+  }
+
+  $txt = strtoupper(trim((string)$gradeValue));
+  if (in_array($txt, ['PASSED', 'PASS', 'COMPLETE', 'COMPLETED'], true)) {
+    return 'completed';
+  }
+  if (in_array($txt, ['FAILED', 'FAIL'], true)) {
+    return 'failed';
+  }
+
+  return 'enrolled';
+}
+
+function ensureGradedSubjectInIrregularDb(mysqli $conn, string $studentId, string $courseCode, string $courseTitle, int $year, int $sem, $gradeValue = null): bool {
+  $tbl = $conn->query("SHOW TABLES LIKE 'irregular_db'");
+  if (!$tbl || $tbl->num_rows === 0) {
+    return false;
+  }
+
+  $colsRes = $conn->query("SHOW COLUMNS FROM irregular_db");
+  if (!$colsRes) {
+    return false;
+  }
+
+  $columns = [];
+  while ($c = $colsRes->fetch_assoc()) {
+    $columns[] = $c['Field'];
+  }
+
+  $yearCol = in_array('year_level', $columns, true) ? 'year_level' : (in_array('year', $columns, true) ? 'year' : null);
+  $semCol = in_array('semester', $columns, true) ? 'semester' : (in_array('sem', $columns, true) ? 'sem' : null);
+  if ($yearCol === null || $semCol === null) {
+    return false;
+  }
+
+  $statusValue = mapIrregularStatusFromGrade($gradeValue);
+
+  $dup = $conn->prepare("SELECT id FROM irregular_db WHERE student_id = ? AND course_code = ? AND {$yearCol} = ? AND {$semCol} = ? LIMIT 1");
+  if ($dup) {
+    $dup->bind_param('ssii', $studentId, $courseCode, $year, $sem);
+    $dup->execute();
+    $dupRes = $dup->get_result();
+    $dupRow = $dupRes ? $dupRes->fetch_assoc() : null;
+    $exists = !empty($dupRow);
+    $dup->close();
+    if ($exists) {
+      if (in_array('status', $columns, true) && in_array($statusValue, ['enrolled', 'completed', 'failed', 'pending'], true)) {
+        $updateDup = $conn->prepare("UPDATE irregular_db SET status = ? WHERE student_id = ? AND course_code = ? AND {$yearCol} = ? AND {$semCol} = ?");
+        if ($updateDup) {
+          $updateDup->bind_param('sssii', $statusValue, $studentId, $courseCode, $year, $sem);
+          $updateDup->execute();
+          $updateDup->close();
+        }
+      }
+      return true;
+    }
+  }
+
+  $lecUnits = 0.0;
+  $labUnits = 0.0;
+  $totalUnits = 0.0;
+  $prereq = '';
+  $cur = $conn->prepare("SELECT * FROM curriculum WHERE course_code = ? LIMIT 1");
+  if ($cur) {
+    $cur->bind_param('s', $courseCode);
+    $cur->execute();
+    $res = $cur->get_result();
+    if ($res && ($row = $res->fetch_assoc())) {
+      $courseTitle = trim((string)($row['course_title'] ?? $courseTitle));
+      $lecUnits = (float)($row['lec_units'] ?? $row['lecture_units'] ?? 0);
+      $labUnits = (float)($row['lab_units'] ?? 0);
+      $totalUnits = (float)($row['total_units'] ?? $row['units'] ?? 0);
+      if ($totalUnits <= 0) $totalUnits = $lecUnits + $labUnits;
+      $prereq = trim((string)($row['prerequisites'] ?? $row['pre_req'] ?? ''));
+    }
+    $cur->close();
+  }
+
+  $program = '';
+  if (in_array('program', $columns, true)) {
+    $p = $conn->prepare("SELECT course FROM signin_db WHERE student_id = ? LIMIT 1");
+    if ($p) {
+      $p->bind_param('s', $studentId);
+      $p->execute();
+      $r = $p->get_result();
+      if ($r && ($pr = $r->fetch_assoc())) {
+        $program = strtoupper(trim((string)($pr['course'] ?? '')));
+      }
+      $p->close();
+    }
+  }
+
+  $insertCols = ['student_id', 'course_code', 'course_title', $yearCol, $semCol];
+  $insertVals = [$studentId, $courseCode, $courseTitle, $year, $sem];
+  $insertTypes = 'sssii';
+
+  if (in_array('total_units', $columns, true)) {
+    $insertCols[] = 'total_units';
+    $insertVals[] = $totalUnits;
+    $insertTypes .= 'd';
+  } elseif (in_array('units', $columns, true)) {
+    $insertCols[] = 'units';
+    $insertVals[] = $totalUnits;
+    $insertTypes .= 'd';
+  }
+  if (in_array('lec_units', $columns, true)) {
+    $insertCols[] = 'lec_units';
+    $insertVals[] = $lecUnits;
+    $insertTypes .= 'd';
+  } elseif (in_array('lecture_units', $columns, true)) {
+    $insertCols[] = 'lecture_units';
+    $insertVals[] = $lecUnits;
+    $insertTypes .= 'd';
+  }
+  if (in_array('lab_units', $columns, true)) {
+    $insertCols[] = 'lab_units';
+    $insertVals[] = $labUnits;
+    $insertTypes .= 'd';
+  }
+  if (in_array('prerequisites', $columns, true)) {
+    $insertCols[] = 'prerequisites';
+    $insertVals[] = $prereq;
+    $insertTypes .= 's';
+  } elseif (in_array('prereq', $columns, true)) {
+    $insertCols[] = 'prereq';
+    $insertVals[] = $prereq;
+    $insertTypes .= 's';
+  }
+  if (in_array('program', $columns, true)) {
+    $insertCols[] = 'program';
+    $insertVals[] = $program;
+    $insertTypes .= 's';
+  }
+  if (in_array('status', $columns, true)) {
+    $insertCols[] = 'status';
+    $insertVals[] = $statusValue;
+    $insertTypes .= 's';
+  }
+  if (in_array('year_semester', $columns, true)) {
+    $insertCols[] = 'year_semester';
+    $insertVals[] = $year . '-' . $sem;
+    $insertTypes .= 's';
+  }
+
+  $sql = "INSERT INTO irregular_db (" . implode(',', $insertCols) . ") VALUES (" . str_repeat('?,', count($insertCols) - 1) . "?)";
+  $stmt = $conn->prepare($sql);
+  if (!$stmt) {
+    return false;
+  }
+  $stmt->bind_param($insertTypes, ...$insertVals);
+  $ok = $stmt->execute();
+  if (!$ok) {
+    error_log('ensureGradedSubjectInIrregularDb insert failed: ' . $stmt->error);
+  }
+  $stmt->close();
+  return (bool)$ok;
+}
+
+function ensurePassedSubjectInIrregularDb(mysqli $conn, string $studentId, string $courseCode, string $courseTitle, int $year, int $sem): bool {
+  return ensureGradedSubjectInIrregularDb($conn, $studentId, $courseCode, $courseTitle, $year, $sem, 2.00);
 }
 
 /**
@@ -349,6 +715,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $semester = intval($_POST['semester'] ?? $_POST['sem'] ?? 1);
         $prerequisites = trim($_POST['prerequisites'] ?? '');
 
+        // Enforce 5th-year insertion for irregular students only.
+        if ($year_level >= 5) {
+          $classStmt = $conn->prepare("SELECT classification FROM signin_db WHERE student_id = ? LIMIT 1");
+          $isIrregularStudent = false;
+          if ($classStmt) {
+            $classStmt->bind_param('s', $student_id);
+            $classStmt->execute();
+            $classRes = $classStmt->get_result();
+            $classRow = $classRes ? $classRes->fetch_assoc() : null;
+            $classStmt->close();
+            $classificationValue = (string)($classRow['classification'] ?? '');
+            $isIrregularStudent = isIrregularClassification($classificationValue);
+          }
+          if (!$isIrregularStudent) {
+            throw new Exception('5th year is available for irregular students only.');
+          }
+        }
+
         if (in_array($semester, [1, 2], true) && isSemesterLocked($conn, $semester)) {
           $label = semesterLabel($semester);
           echo json_encode([
@@ -392,6 +776,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             error_log("Query failed, using form values - Total units: $total_units");
         }
         
+        // Derive total units when curriculum has no explicit total_units value.
+        if ($total_units <= 0) {
+          $total_units = $lec_units + $lab_units;
+        }
+
         // Validate required fields
         if (empty($student_id) || empty($course_code) || empty($course_title)) {
             throw new Exception('Missing required fields: student_id, course_code, or course_title');
@@ -436,10 +825,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
         
         // Build dynamic INSERT statement with available columns
-        $insertCols = ['student_id', 'course_code', 'course_title', 'total_units', $yearCol, $semCol];
+        $totalCol = in_array('total_units', $columns) ? 'total_units' : (in_array('units', $columns) ? 'units' : 'total_units');
+        $insertCols = ['student_id', 'course_code', 'course_title', $totalCol, $yearCol, $semCol];
         $insertVals = [$student_id, $course_code, $course_title, $total_units, $year_level, $semester];
-        $insertTypes = 'sssdis';
-        $insertParams = "sssddiss";
+        $insertTypes = 'sssdii';
         
         // Add optional columns if they exist
         $lecCol = in_array('lec_units', $columns) ? 'lec_units' : (in_array('lecture_units', $columns) ? 'lecture_units' : null);
@@ -452,31 +841,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $insertCols[] = $lecCol;
             $insertVals[] = $lec_units;
             $insertTypes .= 'd';
-            $insertParams .= 'd';
         }
         if ($labCol) {
             $insertCols[] = $labCol;
             $insertVals[] = $lab_units;
             $insertTypes .= 'd';
-            $insertParams .= 'd';
         }
         if ($programCol && !empty($program)) {
             $insertCols[] = $programCol;
             $insertVals[] = strtoupper($program);
             $insertTypes .= 's';
-            $insertParams .= 's';
         }
         if ($prereqCol && !empty($prerequisites)) {
             $insertCols[] = $prereqCol;
             $insertVals[] = $prerequisites;
             $insertTypes .= 's';
-            $insertParams .= 's';
         }
         if ($statusCol) {
             $insertCols[] = $statusCol;
             $insertVals[] = 'enrolled';
             $insertTypes .= 's';
-            $insertParams .= 's';
         }
         
         // Create and execute INSERT statement
@@ -592,9 +976,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['grade'])) {
     }
 
     if ($ok) {
-        echo json_encode(['ok' => true, 'grade' => $grade]);
+      // Auto-sync any subject that already has a grade into irregular_db.
+      ensureGradedSubjectInIrregularDb($conn, $student_id, $course_code, $course_title, (int)$year, (int)$sem, $grade);
+      echo json_encode(['ok' => true, 'success' => true, 'grade' => $grade]);
     } else {
-        echo json_encode(['ok' => false, 'message' => 'Failed to save grade']);
+      echo json_encode(['ok' => false, 'success' => false, 'message' => 'Failed to save grade']);
     }
     exit;
 }
@@ -603,14 +989,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['grade'])) {
 if (isset($_GET['action']) && $_GET['action'] === 'get_other_program_subjects') {
   header('Content-Type: application/json');
 
+  // Get the student ID from the request
+  $reqStudentId = trim($_GET['student_id'] ?? '');
+  if (!$reqStudentId) {
+    $reqStudentId = $studentId; // Use the page-level student ID if not in request
+  }
+
+  // Get the student's enrolled program from signin_db
+  $studentProgram = '';
+  if ($reqStudentId) {
+    $progStmt = $conn->prepare("SELECT course FROM signin_db WHERE student_id = ? LIMIT 1");
+    if ($progStmt) {
+      $progStmt->bind_param('s', $reqStudentId);
+      $progStmt->execute();
+      $progRes = $progStmt->get_result();
+      if ($progRes && $progRes->num_rows > 0) {
+        $progRow = $progRes->fetch_assoc();
+        $studentProgram = strtoupper(trim($progRow['course'] ?? ''));
+      }
+      $progStmt->close();
+    }
+  }
+
   $otherProgram = strtoupper(trim($_GET['program'] ?? ''));
   $year = (int)($_GET['year'] ?? 0);
   $sem  = (int)($_GET['sem'] ?? 0);
 
+  // VALIDATION: Only allow loading courses for the student's enrolled program
   if ($otherProgram === '' || $year <= 0 || $sem <= 0) {
     echo json_encode([
       'success' => false,
       'message' => 'Missing or invalid program / year / semester',
+      'data'    => []
+    ]);
+    exit;
+  }
+
+  // SECURITY: Ensure requested program matches student's enrolled program
+  if (!$studentProgram || $otherProgram !== $studentProgram) {
+    echo json_encode([
+      'success' => false,
+      'message' => 'Access denied. Can only load courses for your enrolled program (' . htmlspecialchars($studentProgram) . ').',
       'data'    => []
     ]);
     exit;
@@ -718,35 +1137,82 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_irregular') {
     $columns[] = $c['Field'];
   }
 
-  $yearCol   = in_array('year_level', $columns, true) ? 'year_level' : (in_array('year', $columns, true) ? 'year' : 'year_level');
-  $semCol    = in_array('semester', $columns, true)   ? 'semester'   : (in_array('sem', $columns, true)   ? 'sem'   : 'semester');
-  $lecCol    = in_array('lec_units', $columns, true)  ? 'lec_units'  : (in_array('lecture_units', $columns, true) ? 'lecture_units' : null);
-  $labCol    = in_array('lab_units', $columns, true)  ? 'lab_units'  : null;
+  $lecCol    = in_array('lec_units', $columns, true) ? 'lec_units' : (in_array('lecture_units', $columns, true) ? 'lecture_units' : null);
+  $labCol    = in_array('lab_units', $columns, true) ? 'lab_units' : null;
   $totalCol  = in_array('total_units', $columns, true) ? 'total_units' : (in_array('units', $columns, true) ? 'units' : null);
-  $statusCol = in_array('status', $columns, true)     ? 'status'     : null;
+  $statusCol = in_array('status', $columns, true) ? 'status' : null;
 
-  // Build a safe SELECT list using only existing columns
+  // Build a safe SELECT list using only existing columns.
+  // We intentionally select multiple year/sem variants then normalize in PHP.
   $selectCols = ['id', 'course_code', 'course_title'];
-  $selectCols[] = $lecCol   ? "$lecCol AS lec_units"   : '0 AS lec_units';
-  $selectCols[] = $labCol   ? "$labCol AS lab_units"   : '0 AS lab_units';
+  $selectCols[] = $lecCol ? "$lecCol AS lec_units" : '0 AS lec_units';
+  $selectCols[] = $labCol ? "$labCol AS lab_units" : '0 AS lab_units';
   $selectCols[] = $totalCol ? "$totalCol AS total_units" : '0 AS total_units';
+  $selectCols[] = in_array('year_level', $columns, true) ? 'year_level AS row_year_level' : 'NULL AS row_year_level';
+  $selectCols[] = in_array('year', $columns, true) ? 'year AS row_year' : 'NULL AS row_year';
+  $selectCols[] = in_array('semester', $columns, true) ? 'semester AS row_semester' : 'NULL AS row_semester';
+  $selectCols[] = in_array('sem', $columns, true) ? 'sem AS row_sem' : 'NULL AS row_sem';
+  $selectCols[] = in_array('year_semester', $columns, true) ? 'year_semester AS row_year_semester' : 'NULL AS row_year_semester';
   if ($statusCol) {
     $selectCols[] = "$statusCol AS status";
   }
 
-  $sql = 'SELECT ' . implode(',', $selectCols) . " FROM irregular_db WHERE student_id = ? AND $yearCol = ? AND $semCol = ?";
+  $sql = 'SELECT ' . implode(',', $selectCols) . ' FROM irregular_db WHERE student_id = ?';
   $stmt = $conn->prepare($sql);
   if (!$stmt) {
     echo json_encode(['success' => false, 'data' => [], 'message' => 'DB error: ' . $conn->error]);
     exit;
   }
 
-  $stmt->bind_param('sii', $student_id, $y, $s);
+  $stmt->bind_param('s', $student_id);
   $stmt->execute();
   $res = $stmt->get_result();
   $rows = [];
   while ($r = $res->fetch_assoc()) {
-    $rows[] = $r;
+    $rowYear = null;
+    $rowSem = null;
+
+    if (isset($r['row_year_level']) && $r['row_year_level'] !== null && $r['row_year_level'] !== '') {
+      $rowYear = parseYearLevelNumber((string)$r['row_year_level']);
+    }
+    if ($rowYear === null && isset($r['row_year']) && $r['row_year'] !== null && $r['row_year'] !== '') {
+      $rowYear = parseYearLevelNumber((string)$r['row_year']);
+    }
+
+    if (isset($r['row_semester']) && $r['row_semester'] !== null && $r['row_semester'] !== '') {
+      $rowSem = parseSemesterNumber((string)$r['row_semester']);
+    }
+    if ($rowSem === null && isset($r['row_sem']) && $r['row_sem'] !== null && $r['row_sem'] !== '') {
+      $rowSem = parseSemesterNumber((string)$r['row_sem']);
+    }
+
+    if (($rowYear === null || $rowSem === null) && !empty($r['row_year_semester'])) {
+      $normYs = normalizeSemesterKey((string)$r['row_year_semester']);
+      if (preg_match('/^([1-5])-([1-2])$/', $normYs, $m)) {
+        if ($rowYear === null) {
+          $rowYear = (int)$m[1];
+        }
+        if ($rowSem === null) {
+          $rowSem = (int)$m[2];
+        }
+      }
+    }
+
+    if ($rowYear !== null && $rowSem !== null && isDeletedAutoloadBlocked($student_id, (string)($r['course_code'] ?? ''), (int)$rowYear, (int)$rowSem)) {
+      continue;
+    }
+
+    if ($rowYear === $y && $rowSem === $s) {
+      $rows[] = [
+        'id' => $r['id'],
+        'course_code' => $r['course_code'],
+        'course_title' => $r['course_title'],
+        'lec_units' => $r['lec_units'] ?? 0,
+        'lab_units' => $r['lab_units'] ?? 0,
+        'total_units' => $r['total_units'] ?? 0,
+        'status' => $r['status'] ?? null,
+      ];
+    }
   }
 
   echo json_encode(['success' => true, 'data' => $rows]);
@@ -781,6 +1247,9 @@ if ((isset($_POST['action']) && $_POST['action'] === 'delete_irregular') ||
 
     // Before deletion, check the semester of this irregular subject and enforce locks
     $subjectSem = null;
+    $subjectStudentId = '';
+    $subjectCourseCode = '';
+    $subjectYear = null;
     try {
       $colsRes = $conn->query('SHOW COLUMNS FROM irregular_db');
       if ($colsRes) {
@@ -788,11 +1257,21 @@ if ((isset($_POST['action']) && $_POST['action'] === 'delete_irregular') ||
         while ($c = $colsRes->fetch_assoc()) {
           $columns[] = $c['Field'];
         }
+        $yearCol = in_array('year_level', $columns, true) ? 'year_level' : (in_array('year', $columns, true) ? 'year' : null);
         $semCol = in_array('semester', $columns, true) ? 'semester' : (in_array('sem', $columns, true) ? 'sem' : null);
         if ($semCol) {
-          $semRes = $conn->query("SELECT {$semCol} AS sem_val FROM irregular_db WHERE id = {$id} LIMIT 1");
+          $selectParts = ['student_id', 'course_code', "{$semCol} AS sem_val"];
+          if ($yearCol) {
+            $selectParts[] = "{$yearCol} AS year_val";
+          }
+          $semRes = $conn->query("SELECT " . implode(', ', $selectParts) . " FROM irregular_db WHERE id = {$id} LIMIT 1");
           if ($semRes && $semRow = $semRes->fetch_assoc()) {
             $subjectSem = (int)$semRow['sem_val'];
+            $subjectStudentId = trim((string)($semRow['student_id'] ?? ''));
+            $subjectCourseCode = trim((string)($semRow['course_code'] ?? ''));
+            if (isset($semRow['year_val'])) {
+              $subjectYear = (int)$semRow['year_val'];
+            }
           }
         }
       }
@@ -811,6 +1290,9 @@ if ((isset($_POST['action']) && $_POST['action'] === 'delete_irregular') ||
     
     if ($result) {
         if ($conn->affected_rows > 0) {
+        if ($subjectStudentId !== '' && $subjectCourseCode !== '' && $subjectYear !== null && $subjectSem !== null) {
+          markDeletedAutoloadBlock($subjectStudentId, $subjectCourseCode, (int)$subjectYear, (int)$subjectSem);
+        }
             echo json_encode(['success' => true, 'message' => 'Subject deleted successfully.', 'debug' => ['id_deleted' => $id, 'affected_rows' => $conn->affected_rows]]);
         } else {
             echo json_encode(['success' => false, 'message' => 'No subject found with the provided ID.', 'debug' => ['id_attempted' => $id]]);
@@ -843,6 +1325,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('Missing student ID or subjects');
             }
 
+            // Enforce 5th-year insertion for irregular students only.
+            $classificationValue = '';
+            $isIrregularStudent = false;
+            $classStmt = $conn->prepare("SELECT classification FROM signin_db WHERE student_id = ? LIMIT 1");
+            if ($classStmt) {
+              $classStmt->bind_param('s', $student_id);
+              $classStmt->execute();
+              $classRes = $classStmt->get_result();
+              $classRow = $classRes ? $classRes->fetch_assoc() : null;
+              $classStmt->close();
+              $classificationValue = (string)($classRow['classification'] ?? '');
+              $isIrregularStudent = isIrregularClassification($classificationValue);
+            }
+            if (!$isIrregularStudent) {
+              foreach ($subjects as $subjectCheck) {
+                $yearLevelCheck = intval($subjectCheck['year_level'] ?? 0);
+                if ($yearLevelCheck >= 5) {
+                  throw new Exception('5th year is available for irregular students only.');
+                }
+              }
+            }
+
             // Check semestral lock based on the first subject's semester
             $firstSubject = $subjects[0] ?? null;
             if ($firstSubject !== null) {
@@ -867,20 +1371,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $effectiveProgram = 'BSIT'; // Fallback when not specified
           }
             
-            // Check for existing subjects to avoid duplicates
-            $existingSubjects = [];
-            $checkStmt = $conn->prepare("SELECT course_code, year_level, semester FROM irregular_db WHERE student_id = ?");
-            if ($checkStmt) {
-                $checkStmt->bind_param('s', $student_id);
-                $checkStmt->execute();
-                $checkResult = $checkStmt->get_result();
-                while ($row = $checkResult->fetch_assoc()) {
-                    $key = $row['course_code'] . '_' . $row['year_level'] . '_' . $row['semester'];
-                    $existingSubjects[$key] = true;
-                }
-                $checkStmt->close();
-            }
-            
             // Determine actual column names in irregular_db
             $colsRes = $conn->query("SHOW COLUMNS FROM irregular_db");
             $columns = [];
@@ -897,6 +1387,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $statusCol = in_array('status', $columns) ? 'status' : null;
             $programCol = in_array('program', $columns) ? 'program' : null;
             $prereqCol = in_array('prerequisites', $columns) ? 'prerequisites' : (in_array('prereq', $columns) ? 'prereq' : null);
+
+            // Check for existing subjects to avoid duplicates (using detected year/sem columns)
+            $existingSubjects = [];
+            $checkStmt = $conn->prepare("SELECT course_code, {$yearCol} AS yv, {$semCol} AS sv FROM irregular_db WHERE student_id = ?");
+            if ($checkStmt) {
+              $checkStmt->bind_param('s', $student_id);
+              $checkStmt->execute();
+              $checkResult = $checkStmt->get_result();
+              while ($row = $checkResult->fetch_assoc()) {
+                $key = $row['course_code'] . '_' . (int)$row['yv'] . '_' . (int)$row['sv'];
+                $existingSubjects[$key] = true;
+              }
+              $checkStmt->close();
+            }
             
             // Debug: Log detected unit columns
             error_log("Unit columns detected - total_units: $totalCol, lec_units: $lecCol, lab_units: $labCol");
@@ -938,6 +1442,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $lab_units = floatval($subject['lab_units'] ?? 0);
                     $total_units = floatval($subject['total_units'] ?? 0);
                 }
+
+                  // Some curriculum rows may not have explicit total_units; derive from lec/lab.
+                  if ($total_units <= 0) {
+                    $total_units = $lec_units + $lab_units;
+                  }
                 
                 // Check for duplicate
                 $key = $course_code . '_' . $year_level . '_' . $semester;
@@ -955,7 +1464,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Build INSERT query with available columns
                 $insertCols = ['student_id', 'course_code', 'course_title', $totalCol, $yearCol, $semCol];
                 $insertVals = [$student_id, $course_code, $course_title, $total_units, $year_level, $semester];
-                $insertTypes = 'sssdis';
+                $insertTypes = 'sssdii';
                 
                 // Debug: Log the units being saved
                 error_log("Saving units for $course_code - Total: $total_units, Lec: $lec_units, Lab: $lab_units");
@@ -1008,10 +1517,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($stmt->execute()) {
                         $successCount++;
                     } else {
+                    error_log('Bulk irregular insert failed for ' . $course_code . ': ' . $stmt->error);
                         $errorCount++;
                     }
                     $stmt->close();
                 } else {
+                  error_log('Bulk irregular prepare failed for ' . $course_code . ': ' . $conn->error);
                     $errorCount++;
                 }
             }
@@ -1041,27 +1552,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $currentSem = $GLOBALS['currentSem'] ?? 1;
                 
                 // Update each newly added subject with correct year_semester format
-                foreach ($subjects as $subject) {
+                if (in_array('year_semester', $columns, true)) {
+                  foreach ($subjects as $subject) {
                     $yearLevel = intval($subject['year_level'] ?? 1);
                     $semester = intval($subject['semester'] ?? 1);
                     $yearSem = $yearLevel . '-' . $semester; // Format: Y-S (1-1, 1-2, 2-1, etc.)
-                    
-                    $updateIrregularSql = "UPDATE irregular_db SET year_semester = ? WHERE student_id = ? AND course_code = ? AND year_level = ? AND semester = ?";
+
+                    $updateIrregularSql = "UPDATE irregular_db SET year_semester = ? WHERE student_id = ? AND course_code = ? AND {$yearCol} = ? AND {$semCol} = ?";
                     $updateIrregularStmt = $conn->prepare($updateIrregularSql);
                     if ($updateIrregularStmt) {
-                        $updateIrregularStmt->bind_param('sssii', $yearSem, $student_id, $subject['course_code'], $yearLevel, $semester);
-                        $updateIrregularStmt->execute();
-                        $updateIrregularStmt->close();
+                      $updateIrregularStmt->bind_param('sssii', $yearSem, $student_id, $subject['course_code'], $yearLevel, $semester);
+                      $updateIrregularStmt->execute();
+                      $updateIrregularStmt->close();
                     }
+                  }
                 }
             }
-            
-            echo json_encode([
-                'success' => true,
-                'message' => "Successfully added $successCount subjects. " . 
-                            ($duplicateCount > 0 ? "$duplicateCount duplicates skipped. " : "") .
-                            ($errorCount > 0 ? "$errorCount errors occurred." : "")
-            ]);
+
+              $responseSuccess = $successCount > 0;
+              $responseMessage = "Successfully added $successCount subjects. " .
+                         ($duplicateCount > 0 ? "$duplicateCount duplicates skipped. " : "") .
+                         ($errorCount > 0 ? "$errorCount errors occurred." : "");
+              if (!$responseSuccess) {
+                $responseMessage = "No subjects were inserted. " . $responseMessage;
+              }
+
+              echo json_encode([
+                'success' => $responseSuccess,
+                'message' => trim($responseMessage)
+              ]);
             
         } catch (Exception $e) {
             error_log("Bulk save error: " . $e->getMessage());
@@ -1085,6 +1604,36 @@ $program = trim($_GET['program'] ?? $_POST['program'] ?? '');
 // Preserve any program chosen in the form (e.g. cross-program evaluation)
 $formProgram = strtoupper(trim($program));
 $fiscalYear = trim($_GET['fiscal_year'] ?? $_POST['fiscal_year'] ?? '');
+
+// Classification policy based on total failed units:
+// - >= 6.00 units: Probationary
+// - >= 6.25 units: Dismissal
+if ($studentId !== '') {
+  try {
+    $failedUnits = calculateFailedUnitsForStudent($conn, $studentId);
+    $ruleClassification = classificationByFailedUnits($failedUnits);
+
+    if ($ruleClassification !== null) {
+      $updateSigninStmt = $conn->prepare("UPDATE signin_db SET classification = ? WHERE student_id = ? AND (classification IS NULL OR classification <> ?)");
+      if ($updateSigninStmt) {
+        $updateSigninStmt->bind_param('sss', $ruleClassification, $studentId, $ruleClassification);
+        $updateSigninStmt->execute();
+        $updateSigninStmt->close();
+      }
+
+      if (columnExists($conn, 'students_db', 'classification')) {
+        $updateStudentsStmt = $conn->prepare("UPDATE students_db SET classification = ? WHERE student_id = ? AND (classification IS NULL OR classification <> ?)");
+        if ($updateStudentsStmt) {
+          $updateStudentsStmt->bind_param('sss', $ruleClassification, $studentId, $ruleClassification);
+          $updateStudentsStmt->execute();
+          $updateStudentsStmt->close();
+        }
+      }
+    }
+  } catch (Throwable $e) {
+    error_log('Failed-unit classification update failed in stueval.php: ' . $e->getMessage());
+  }
+}
 
 $student = null;
 if ($studentId !== '') {
@@ -1111,7 +1660,10 @@ if ($studentId !== '') {
             'curriculum' => 'curriculum',
             'classification' => 'classification',
             'category' => 'category',
-            'year_level' => 'year_level'
+          'year_level' => 'year_level',
+          'academic_year' => 'academic_year',
+          'semester' => 'semester',
+          'sem' => 'sem'
         ];
         
         // Always include CONCAT for full name
@@ -1604,6 +2156,18 @@ if ($studentId !== '') {
             // Store with year and semester for better matching
             $year = intval($g['year'] ?? 0);
             $sem = intval($g['sem'] ?? 0);
+
+            // Keep irregular_db aligned for already-evaluated subjects.
+            // This ensures grades that existed before opening this page are backfilled.
+            if ($year > 0 && $sem > 0) {
+              $syncCourseTitle = trim((string)($g['course_title'] ?? ''));
+              if ($syncCourseTitle === '') {
+                $syncCourseTitle = $code;
+              }
+              if (!isDeletedAutoloadBlocked($studentId, $code, $year, $sem)) {
+                ensureGradedSubjectInIrregularDb($conn, $studentId, $code, $syncCourseTitle, $year, $sem, $gradeValue);
+              }
+            }
             
             if ($year && $sem) {
                 // Format: CCS-0001_1_1
@@ -1829,13 +2393,87 @@ $yearLevelLabels = [
   2 => '2nd Year',
   3 => '3rd Year',
   4 => '4th Year',
+  5 => '5th Year',
 ];
 $effectiveYearLabel = $yearLevelLabels[$effectiveYearLevel] ?? ($effectiveYearLevel . 'th Year');
+
+// Connect displayed Year Level to student academic_year (if present) for clearer UX.
+$studentAcademicYearRaw = (string)($student['academic_year'] ?? $student['year_level'] ?? '');
+$academicYearLevel = parseYearLevelNumber($studentAcademicYearRaw);
+
+// Resolve visible year level:
+// - keep the highest known standing between stored academic year and computed progress
+// - this avoids dropping to 1st year just because of back subjects
+if ($academicYearLevel !== null) {
+  $displayYearLevel = max($academicYearLevel, $effectiveYearLevel);
+} else {
+  $displayYearLevel = $effectiveYearLevel;
+}
+
+$displayYearLevelLabel = $yearLevelLabels[$displayYearLevel] ?? ($displayYearLevel . 'th Year');
+
+$studentSemesterRaw = (string)($student['semester'] ?? $student['sem'] ?? '');
+$displaySemesterNumber = parseSemesterNumber($studentSemesterRaw);
+$displayYearLevelText = $displayYearLevelLabel;
+if ($displaySemesterNumber !== null) {
+  $displayYearLevelText .= ' • ' . semesterLabel($displaySemesterNumber);
+}
+
+// Keep signin_db.academic_year in sync with the resolved year level shown in UI.
+if (!empty($studentId) && columnExists($conn, 'signin_db', 'academic_year')) {
+  $dbAcademicYearTarget = $displayYearLevelLabel;
+  $dbAcademicYearCurrent = trim((string)($student['academic_year'] ?? ''));
+
+  if ($dbAcademicYearCurrent !== $dbAcademicYearTarget) {
+    $syncAcademicYearStmt = $conn->prepare("UPDATE signin_db SET academic_year = ? WHERE student_id = ?");
+    if ($syncAcademicYearStmt) {
+      $syncAcademicYearStmt->bind_param('ss', $dbAcademicYearTarget, $studentId);
+      $syncAcademicYearStmt->execute();
+      $syncAcademicYearStmt->close();
+
+      // Reflect sync immediately in current request context.
+      $student['academic_year'] = $dbAcademicYearTarget;
+    }
+  }
+}
+
+// Keep students_db academic year/year level aligned too, when available.
+if (!empty($studentId)) {
+  $studentsDbYearCol = null;
+  if (columnExists($conn, 'students_db', 'academic_year')) {
+    $studentsDbYearCol = 'academic_year';
+  } elseif (columnExists($conn, 'students_db', 'year_level')) {
+    $studentsDbYearCol = 'year_level';
+  }
+
+  if ($studentsDbYearCol !== null) {
+    $dbAcademicYearTarget = $displayYearLevelLabel;
+    $studentsDbCurrentStmt = $conn->prepare("SELECT {$studentsDbYearCol} AS yr FROM students_db WHERE student_id = ? LIMIT 1");
+    if ($studentsDbCurrentStmt) {
+      $studentsDbCurrentStmt->bind_param('s', $studentId);
+      $studentsDbCurrentStmt->execute();
+      $studentsDbCurrentRes = $studentsDbCurrentStmt->get_result();
+      $studentsDbCurrentRow = $studentsDbCurrentRes ? $studentsDbCurrentRes->fetch_assoc() : null;
+      $studentsDbCurrentStmt->close();
+
+      $studentsDbCurrent = trim((string)($studentsDbCurrentRow['yr'] ?? ''));
+      if ($studentsDbCurrent !== $dbAcademicYearTarget) {
+        $studentsDbSyncStmt = $conn->prepare("UPDATE students_db SET {$studentsDbYearCol} = ? WHERE student_id = ?");
+        if ($studentsDbSyncStmt) {
+          $studentsDbSyncStmt->bind_param('ss', $dbAcademicYearTarget, $studentId);
+          $studentsDbSyncStmt->execute();
+          $studentsDbSyncStmt->close();
+        }
+      }
+    }
+  }
+}
 
 // Special rule: for IRREGULAR students in 4-1 and 4-2,
 // allow an additional 6 units above the base limit.
 $studentClassification = strtolower(trim($student['classification'] ?? ''));
-if (strpos($studentClassification, 'irregular') !== false && !empty($program)) {
+$isIrregularForUi = isIrregularClassification((string)($student['classification'] ?? ''));
+if ($isIrregularForUi && !empty($program)) {
   foreach (['4-1', '4-2'] as $ys) {
     if (isset($unitLimits[$program][$ys])) {
       $unitLimits[$program][$ys]['max'] += 6.0;
@@ -1864,6 +2502,11 @@ try {
 // Enrollment period / evaluation window for this page
 $evaluationOpen = true;
 $enrollmentPeriodMessage = '';
+
+$deletedAutoloadBlockKeysForUi = [];
+if (!empty($studentId) && isset($_SESSION['deleted_irregular_autoload_blocks'][$studentId]) && is_array($_SESSION['deleted_irregular_autoload_blocks'][$studentId])) {
+  $deletedAutoloadBlockKeysForUi = array_keys($_SESSION['deleted_irregular_autoload_blocks'][$studentId]);
+}
 
 // Render a compact layout (no sidebar) when opened inside iframe modal.
 // Keep modal mode on subsequent Evaluate submits by honoring both GET and POST.
@@ -1921,6 +2564,9 @@ try {
     window.hasFirstYearFirstSem = <?php echo $hasFirstYearFirstSemGrade ? 'true' : 'false'; ?>;
     // Expose student classification for client-side rules (e.g., irregular caps)
     window.studentClassification = <?php echo json_encode($student['classification'] ?? ''); ?>;
+    // Source of truth for UI gating of irregular-only controls.
+    window.isIrregularForUi = <?php echo !empty($isIrregularForUi) ? 'true' : 'false'; ?>;
+    window.deletedAutoloadBlockKeys = <?php echo json_encode($deletedAutoloadBlockKeysForUi ?? []); ?>;
     // Effective academic year (promotion based on 1-1,1-2,2-1,2-2,3-1,3-2,4-1,4-2)
     window.effectiveYearLevel = <?php echo (int)$effectiveYearLevel; ?>;
     window.promotionIsIrregular = <?php echo $promotionIsIrregular ? 'true' : 'false'; ?>;
@@ -2315,7 +2961,7 @@ try {
       </div>
       <?php endif; ?>
       <div class="col-sm-2">
-        <button class="btn btn-primary w-100" type="submit">Evaluate</button>
+        <button class="btn btn-primary w-100" type="submit" name="evaluate" value="1">Evaluate</button>
       </div>
     </form>
   </div>
@@ -2434,7 +3080,10 @@ try {
           <div class="mt-1 small text-muted">
             Year Level :
             <?php $yearBadgeClass = $promotionIsIrregular ? 'badge bg-danger' : 'badge bg-success'; ?>
-            <span class="<?= $yearBadgeClass ?> ms-1"><?= htmlspecialchars($effectiveYearLabel) ?></span>
+            <span class="<?= $yearBadgeClass ?> ms-1\"><?= htmlspecialchars($displayYearLevelLabel) ?></span>
+            <?php if ($displayYearLevel !== $effectiveYearLevel): ?>
+              <div class="small text-muted mt-1">Computed progress: <?= htmlspecialchars($effectiveYearLabel) ?></div>
+            <?php endif; ?>
           </div>
         </div>
       </div>
@@ -2462,6 +3111,10 @@ try {
       '4-1' => '<i class="bi bi-7-circle me-2"></i> FOURTH YEAR • FIRST SEMESTER',
       '4-2' => '<i class="bi bi-8-circle me-2"></i> FOURTH YEAR • SECOND SEMESTER',
     ];
+    if (!empty($isIrregularForUi)) {
+      $labels['5-1'] = '<i class="bi bi-plus-circle me-2"></i> FIFTH YEAR • FIRST SEMESTER';
+      $labels['5-2'] = '<i class="bi bi-plus-circle-fill me-2"></i> FIFTH YEAR • SECOND SEMESTER';
+    }
     
     // Get all irregular subjects for this student (load once for all semesters)
     $allIrregularSubjects = [];
@@ -2694,7 +3347,7 @@ try {
         $maxUnits = isset($maxUnitsPerSemester[$ysKey]) ? $maxUnitsPerSemester[$ysKey] : 0;
         $isOverLimit = $semesterUnits > $maxUnits;
     ?>
-  <div class="mb-4 <?= $isOverLimit ? 'unit-overlimit unit-limit-warning' : '' ?>" data-ys="<?= htmlspecialchars($ysKey) ?>">
+  <div class="mb-4 <?= $isOverLimit ? 'unit-overlimit unit-limit-warning' : '' ?>" data-ys="<?= htmlspecialchars($ysKey) ?>" data-current-units="<?= htmlspecialchars(number_format($semesterUnits, 1, '.', '')) ?>" data-max-units="<?= htmlspecialchars(number_format($maxUnits, 1, '.', '')) ?>">
         <div class="d-flex justify-content-between align-items-center mb-2">
           <div class="semester-title d-flex align-items-center">
             <?= $labels[$ysKey] ?>
@@ -3349,6 +4002,10 @@ if (!empty($curriculum)) {
       <h5 class="mb-0"><i class="bi bi-check-square me-2"></i>Bulk Save Selected Subjects</h5>
     </div>
     <div class="card-body">
+      <?php
+        $studentClassForUi = strtolower(trim($student['classification'] ?? ''));
+        $isIrregularForUi = strpos($studentClassForUi, 'irregular') !== false;
+      ?>
       <div class="row">
         <div class="col-md-6">
           <label for="bulkYearSem" class="form-label">Select Year and Semester:</label>
@@ -3362,6 +4019,10 @@ if (!empty($curriculum)) {
             <option value="3-2">3rd Year • Second Semester</option>
             <option value="4-1">4th Year • First Semester</option>
             <option value="4-2">4th Year • Second Semester</option>
+            <?php if ($isIrregularForUi): ?>
+            <option value="5-1">5th Year • First Semester</option>
+            <option value="5-2">5th Year • Second Semester</option>
+            <?php endif; ?>
           </select>
         </div>
         <div class="col-md-6 d-flex align-items-end">
@@ -3375,10 +4036,6 @@ if (!empty($curriculum)) {
           </div>
         </div>
       </div>
-      <?php
-        $studentClassForUi = strtolower(trim($student['classification'] ?? ''));
-        $isIrregularForUi = strpos($studentClassForUi, 'irregular') !== false;
-      ?>
       <?php if ($isIrregularForUi): ?>
       <div class="row mt-3">
         <div class="col-md-12 d-flex justify-content-start">
@@ -3542,6 +4199,9 @@ if (!empty($curriculum)) {
                 <option value="2">2nd Year</option>
                 <option value="3">3rd Year</option>
                 <option value="4">4th Year</option>
+                <?php if (!empty($isIrregularForUi)): ?>
+                <option value="5">5th Year</option>
+                <?php endif; ?>
               </select>
             </div>
             <div class="col-md-6 mb-3">
@@ -3589,14 +4249,11 @@ if (!empty($curriculum)) {
         <div class="row mb-3">
           <div class="col-md-4">
             <label class="form-label">Program</label>
-            <select class="form-select" id="otherProgramSelect">
-              <option value="">Select program...</option>
-              <?php foreach ($availablePrograms as $progName): ?>
-                <option value="<?= htmlspecialchars(strtoupper($progName)) ?>">
-                  <?= htmlspecialchars($progName) ?>
-                </option>
-              <?php endforeach; ?>
-            </select>
+            <input type="hidden" id="otherProgramSelect" value="<?= htmlspecialchars($program) ?>">
+            <div class="form-control bg-light">
+              <strong><?= htmlspecialchars($program) ?></strong>
+              <span class="text-muted small d-block">(Student's enrolled program)</span>
+            </div>
           </div>
           <div class="col-md-3">
             <label class="form-label">Year Level</label>
@@ -3605,6 +4262,9 @@ if (!empty($curriculum)) {
               <option value="2">2nd Year</option>
               <option value="3">3rd Year</option>
               <option value="4">4th Year</option>
+              <?php if (!empty($isIrregularForUi)): ?>
+              <option value="5">5th Year</option>
+              <?php endif; ?>
             </select>
           </div>
           <div class="col-md-3">
@@ -3683,6 +4343,24 @@ if (!empty($curriculum)) {
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // Hard-enforce hiding 5th-year choices for non-irregular students.
+    if (!window.isIrregularForUi) {
+      const fifthOptionSelectors = [
+        '#bulkYearSem option[value="5-1"]',
+        '#bulkYearSem option[value="5-2"]',
+        '#yearSelect option[value="5"]',
+        '#otherYearSelect option[value="5"]'
+      ];
+      document.querySelectorAll(fifthOptionSelectors.join(',')).forEach(function(opt) {
+        opt.remove();
+      });
+
+      // If 5th-year sections exist in DOM, hide them for regular students.
+      document.querySelectorAll('div.mb-4[data-ys="5-1"], div.mb-4[data-ys="5-2"]').forEach(function(el) {
+        el.remove();
+      });
+    }
+
     // Handle Select All for any semester
     document.addEventListener('click', function(e) {
         const selectAllBtn = e.target.closest('.select-semester');
@@ -4025,6 +4703,10 @@ document.addEventListener('DOMContentLoaded', function() {
     e.preventDefault();
     const ys = badge.getAttribute('data-ys');
     if (!ys) return;
+    const selectModalEl = document.getElementById('selectSubjectModal');
+    if (selectModalEl) {
+      selectModalEl.dataset.currentYs = ys;
+    }
 
     // Find the semester block
     const semBlock = document.querySelector(`div.mb-4[data-ys="${ys}"]`);
@@ -4127,9 +4809,16 @@ document.addEventListener('DOMContentLoaded', function() {
     addSubjectModal.dataset.prefillTitle = title;
     addSubjectModal.dataset.prefillUnits = units;
 
+    const selectModalEl = document.getElementById('selectSubjectModal');
+    const currentYs = (selectModalEl && selectModalEl.dataset.currentYs) ? selectModalEl.dataset.currentYs : '';
+    if (currentYs && currentYs.includes('-')) {
+      const [prefillYear, prefillSem] = currentYs.split('-');
+      addSubjectModal.dataset.prefillYear = prefillYear;
+      addSubjectModal.dataset.prefillSem = prefillSem;
+    }
+
     // Optionally set year/sem based on current view; leave defaults otherwise
     // Close the selector modal first
-    const selectModalEl = document.getElementById('selectSubjectModal');
     const selectModal = bootstrap.Modal.getInstance(selectModalEl);
     if (selectModal) selectModal.hide();
 
@@ -4193,11 +4882,29 @@ document.addEventListener('DOMContentLoaded', function() {
       console.log('Delete response data:', data);
       if (data.success) {
         alert(`${code} has been deleted successfully.`);
-        // Close the modal and refresh the page
-        const selectModalEl = document.getElementById('selectSubjectModal');
-        const selectModal = bootstrap.Modal.getInstance(selectModalEl);
-        if (selectModal) selectModal.hide();
-        location.reload();
+        // Update the modal table in place so the page does not reload.
+        const row = deleteBtn.closest('tr');
+        if (row) {
+          row.remove();
+        }
+
+        const tbody = document.querySelector('#selectSubjectTable tbody');
+        const remainingRows = tbody ? Array.from(tbody.querySelectorAll('tr')) : [];
+        if (tbody && remainingRows.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No irregular subjects remain in this semester.</td></tr>';
+        }
+
+        const countEl = document.getElementById('selectSubjectCount');
+        const unitsEl = document.getElementById('selectSubjectUnits');
+        if (tbody && countEl && unitsEl) {
+          const rows = Array.from(tbody.querySelectorAll('tr')).filter(tr => tr.querySelector('.delete-irregular'));
+          const totalUnits = rows.reduce((sum, tr) => {
+            const unitsCell = tr.querySelectorAll('td')[4];
+            return sum + (parseFloat(unitsCell?.textContent || '0') || 0);
+          }, 0);
+          countEl.textContent = String(rows.length);
+          unitsEl.textContent = totalUnits.toFixed(1);
+        }
       } else {
         alert(`Error deleting ${code}: ${data.message || 'Unknown error'}`);
       }
@@ -4265,7 +4972,7 @@ document.addEventListener('DOMContentLoaded', function() {
       btnSave.disabled = true;
       btnSave.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
       
-      const res = await fetch('save_grade.php', { 
+      const res = await fetch('stueval.php', { 
         method: 'POST', 
         body: fd 
       });
@@ -4451,13 +5158,25 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     }
 
-    function getCurrentIrregularUnitsBySemester() {
+    function getCurrentSemesterUnitsBySemester() {
       const unitsBySemester = {};
       document.querySelectorAll('div.mb-4[data-ys]').forEach(block => {
         const ys = block.getAttribute('data-ys');
         if (!ys) return;
-        const irregularBadge = block.querySelector('.open-select-subjects');
-        unitsBySemester[ys] = irregularBadge ? parseUnits(irregularBadge.textContent) : 0;
+        const currentUnitsAttr = parseFloat(block.getAttribute('data-current-units') || '0');
+        if (!Number.isNaN(currentUnitsAttr)) {
+          unitsBySemester[ys] = currentUnitsAttr;
+          return;
+        }
+
+        // Fallback: parse the calculator badge text "X / Y".
+        const calcBadge = block.querySelector('.badge.bg-secondary.rounded-pill, .badge.bg-danger.rounded-pill');
+        if (calcBadge) {
+          const first = String(calcBadge.textContent || '').split('/')[0] || '';
+          unitsBySemester[ys] = parseUnits(first);
+        } else {
+          unitsBySemester[ys] = 0;
+        }
       });
       return unitsBySemester;
     }
@@ -4493,18 +5212,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function buildOverloadWarnings(summary) {
       const warnings = [];
-      const currentIrregularBySemester = getCurrentIrregularUnitsBySemester();
+      const currentUnitsBySemester = getCurrentSemesterUnitsBySemester();
 
       Object.keys(summary.selectedUnitsBySemester).forEach(ys => {
-        const currentIrregularUnits = currentIrregularBySemester[ys] || 0;
+        const currentSemesterUnits = currentUnitsBySemester[ys] || 0;
         const selectedUnits = summary.selectedUnitsBySemester[ys] || 0;
         const maxUnits = getMaxUnitsForSemester(ys);
-        const afterTotal = currentIrregularUnits + selectedUnits;
+        const afterTotal = currentSemesterUnits + selectedUnits;
 
         if (afterTotal > maxUnits) {
           warnings.push({
             ys,
-            currentIrregularUnits,
+            currentSemesterUnits,
             selectedUnits,
             afterTotal,
             maxUnits,
@@ -4525,7 +5244,9 @@ document.addEventListener('DOMContentLoaded', function() {
         '3-1': 'Third Year - First Semester',
         '3-2': 'Third Year - Second Semester',
         '4-1': 'Fourth Year - First Semester',
-        '4-2': 'Fourth Year - Second Semester'
+        '4-2': 'Fourth Year - Second Semester',
+        '5-1': 'Fifth Year - First Semester',
+        '5-2': 'Fifth Year - Second Semester'
       };
       return map[ys] || ys;
     }
@@ -4694,7 +5415,7 @@ document.addEventListener('DOMContentLoaded', function() {
       const count = selectedCheckboxes.length;
       const totalUnits = summary.totalSelectedUnits;
       const overloadWarnings = buildOverloadWarnings(summary);
-      const currentIrregularBySemester = getCurrentIrregularUnitsBySemester();
+      const currentUnitsBySemester = getCurrentSemesterUnitsBySemester();
 
       updateSemesterLiveBadges(summary, overloadWarnings);
       updateFloatingCounter(summary, overloadWarnings);
@@ -4705,7 +5426,7 @@ document.addEventListener('DOMContentLoaded', function() {
       const selectedYearSem = (bulkYearSem && bulkYearSem.value) ? bulkYearSem.value : '';
       if (selectedYearSem) {
         const selectedInSem = summary.selectedUnitsBySemester[selectedYearSem] || 0;
-        const currentInSem = currentIrregularBySemester[selectedYearSem] || 0;
+        const currentInSem = currentUnitsBySemester[selectedYearSem] || 0;
         const maxInSem = getMaxUnitsForSemester(selectedYearSem);
         const totalAfter = currentInSem + selectedInSem;
         totalUnitsBadge.textContent = `${selectedInSem.toFixed(1)} sel | ${totalAfter.toFixed(1)} / ${maxInSem.toFixed(1)}`;
@@ -4717,7 +5438,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
       if (selectedYearSem) {
         const selectedInSem = summary.selectedUnitsBySemester[selectedYearSem] || 0;
-        const currentInSem = currentIrregularBySemester[selectedYearSem] || 0;
+        const currentInSem = currentUnitsBySemester[selectedYearSem] || 0;
         const maxInSem = getMaxUnitsForSemester(selectedYearSem);
         const totalAfter = currentInSem + selectedInSem;
         totalUnitsBadge.classList.add(totalAfter > maxInSem ? 'bg-danger' : 'bg-success');
@@ -4819,7 +5540,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 title: 'Unit Reminder',
                 html: `
                   <p><strong>${formatSemesterLabel(warning.ys)}</strong> is over the unit limit.</p>
-                  <p>Current irregular: ${warning.currentIrregularUnits.toFixed(1)} units</p>
+                  <p>Current units: ${warning.currentSemesterUnits.toFixed(1)} units</p>
                   <p>Selected now: ${warning.selectedUnits.toFixed(1)} units</p>
                   <p>Total: <strong>${warning.afterTotal.toFixed(1)}</strong> / ${warning.maxUnits.toFixed(1)} units</p>
                   <p>Over by: <strong>${warning.overBy.toFixed(1)}</strong> units</p>
@@ -4970,31 +5691,14 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('Unit limits:', unitLimits);
         console.log('YearSem:', yearSem);
         
-        // Get current units from irregular_db only (not including curriculum subjects)
+        // Get current semester units (already-graded curriculum + irregular) from server-rendered data attribute.
         let currentUnits = 0;
         const semesterBlock = yearSem ? document.querySelector(`div.mb-4[data-ys="${yearSem}"]`) : null;
         if (semesterBlock) {
-            // Look for irregular units badge specifically, not the total badge
-            const irregularBadge = semesterBlock.querySelector('.badge.bg-success.rounded-pill');
-            if (irregularBadge) {
-                const match = irregularBadge.textContent.match(/([\d.]+)/);
-                if (match) {
-                    currentUnits = parseFloat(match[1]);
-                    console.log('Found irregular units:', currentUnits);
-                }
-            } else {
-                // Fallback: Look for any badge that shows irregular units
-                const badges = semesterBlock.querySelectorAll('.badge');
-                badges.forEach(badge => {
-                    if (badge.textContent.includes('Irregular Units')) {
-                        const match = badge.textContent.match(/([\d.]+)/);
-                        if (match) {
-                            currentUnits = parseFloat(match[1]);
-                            console.log('Found irregular units in badge:', currentUnits);
-                        }
-                    }
-                });
-            }
+          const currentAttr = parseFloat(semesterBlock.getAttribute('data-current-units') || '0');
+          if (!Number.isNaN(currentAttr)) {
+            currentUnits = currentAttr;
+          }
         }
         
         console.log('Current irregular units:', currentUnits);
@@ -5130,6 +5834,66 @@ document.addEventListener('DOMContentLoaded', function() {
 
       otherProgramBtn.addEventListener('click', function() {
         otherTableBody.innerHTML = '';
+        // Auto-load courses for the student's program with default year/semester
+        const defaultYear = otherYearSelect.value || '1';
+        const defaultSem = otherSemSelect.value || '1';
+        const prog = otherProgramSelect.value;
+        
+        if (prog) {
+          // Auto-load courses after showing modal
+          setTimeout(() => {
+            otherTableBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Loading subjects for your program...</td></tr>';
+            
+            const url = `stueval.php?action=get_other_program_subjects&student_id=${encodeURIComponent(studentIdForOther)}&program=${encodeURIComponent(prog)}&year=${encodeURIComponent(defaultYear)}&sem=${encodeURIComponent(defaultSem)}`;
+            
+            fetch(url)
+              .then(r => r.json())
+              .then(data => {
+                if (!data.success) {
+                  otherTableBody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">${data.message || 'Failed to load subjects.'}</td></tr>`;
+                  return;
+                }
+
+                const rows = data.data || [];
+                if (!rows.length) {
+                  otherTableBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No subjects found for this program and semester.</td></tr>';
+                  return;
+                }
+
+                otherTableBody.innerHTML = '';
+                rows.forEach(r => {
+                  const tr = document.createElement('tr');
+                  const units = parseFloat(r.units || 0) || 0;
+                  tr.innerHTML = `
+                    <td>${r.code}</td>
+                    <td>${r.title}</td>
+                    <td class="text-center">${r.lec ?? '0'}</td>
+                    <td class="text-center">${r.lab ?? '0'}</td>
+                    <td class="text-center">${units.toFixed(1)}</td>
+                    <td class="text-center">
+                      <button class="btn btn-sm btn-primary add-other-subject"
+                              data-code="${r.code}"
+                              data-title="${r.title}"
+                              data-lec="${r.lec ?? '0'}"
+                              data-lab="${r.lab ?? '0'}"
+                              data-units="${units.toFixed(1)}"
+                              data-year="${defaultYear}"
+                              data-sem="${defaultSem}"
+                              data-program="${prog}">
+                        <i class="bi bi-plus-circle"></i> Add
+                      </button>
+                    </td>
+                  `;
+                  otherTableBody.appendChild(tr);
+                });
+              })
+              .catch(err => {
+                console.error('Error loading other program subjects:', err);
+                otherTableBody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Error loading subjects.</td></tr>';
+              });
+          }, 500);
+        }
+        
         otherProgramModal.show();
       });
 
@@ -5142,7 +5906,7 @@ document.addEventListener('DOMContentLoaded', function() {
           Swal.fire({
             icon: 'warning',
             title: 'Missing Information',
-            text: 'Please select a program, year level, and semester.',
+            text: 'Please select year level and semester.',
             confirmButtonText: 'OK'
           });
           return;
@@ -5150,7 +5914,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         otherTableBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Loading subjects...</td></tr>';
 
-        const url = `stueval.php?action=get_other_program_subjects&program=${encodeURIComponent(prog)}&year=${encodeURIComponent(year)}&sem=${encodeURIComponent(sem)}`;
+        const url = `stueval.php?action=get_other_program_subjects&student_id=${encodeURIComponent(studentIdForOther)}&program=${encodeURIComponent(prog)}&year=${encodeURIComponent(year)}&sem=${encodeURIComponent(sem)}`;
 
         fetch(url)
           .then(r => r.json())

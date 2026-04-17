@@ -982,6 +982,11 @@ function calculateYearlyUnits($courses) {
                     <i class="bi bi-book"></i> Fourth Year
                 </a>
             </li>
+            <li class="nav-item mb-2">
+                <a href="#" class="nav-link text-white" data-bs-toggle="modal" data-bs-target="#fifthYearModal">
+                    <i class="bi bi-book"></i> Fifth Year
+                </a>
+            </li>
               <li class="nav-item mb-2">
                 <a href="print_prospectus.php" class="nav-link text-white">
                     <i class="bi bi-printer"></i> Print Prospectus
@@ -1298,6 +1303,94 @@ foreach ($courses['1-2'] as $course) {
             $first_sem_units = 0;
             $second_sem_units = 0;
             $fourth_sem_units = 0;
+        }
+
+        // FETCH YEAR 5 CURRICULUM DATA FOR BSIT
+        $courses_5 = [
+            '5-1' => [],
+            '5-2' => []
+        ];
+        $fifth_sem_units = 0;
+        $sixth_sem_units = 0;
+
+        try {
+            // Get all fifth year courses from irregular_db
+            $whereClause5_1 = '';
+            if (in_array('year_level', $columns) && in_array('semester', $columns)) {
+                if (!empty($studentId)) {
+                    $whereClause5_1 = " WHERE student_id = '$studentId' AND year_level = 5 AND semester = 1";
+                } else {
+                    $whereClause5_1 = " WHERE year_level = 5 AND semester = 1";
+                }
+            }
+            
+            $sql5_1 = "SELECT " . implode(', ', $selectFields) . " 
+                    FROM `$tableName`" . 
+                    $whereClause5_1 . 
+                    " ORDER BY year_level, semester, course_code";
+            
+            $result5_1 = $conn->query($sql5_1);
+            
+            if ($result5_1 && $result5_1->num_rows > 0) {
+                while ($row = $result5_1->fetch_assoc()) {
+                    $units = isset($row['total_units']) ? (float)$row['total_units'] : 0;
+                    
+                    $courseData = [
+                        'course_code' => $row['course_code'] ?? '',
+                        'course_title' => $row['course_title'] ?? '',
+                        'lec_units' => $row['lec_units'] ?? 0,
+                        'lab_units' => $row['lab_units'] ?? 0,
+                        'total_units' => $units,
+                        'prerequisites' => $row['prerequisites'] ?? ''
+                    ];
+                    
+                    $courses_5['5-1'][] = $courseData;
+                    $fifth_sem_units += $units;
+                }
+            }
+            
+            // Get all fifth year semester 2 courses
+            $whereClause5_2 = '';
+            if (in_array('year_level', $columns) && in_array('semester', $columns)) {
+                if (!empty($studentId)) {
+                    $whereClause5_2 = " WHERE student_id = '$studentId' AND year_level = 5 AND semester = 2";
+                } else {
+                    $whereClause5_2 = " WHERE year_level = 5 AND semester = 2";
+                }
+            }
+            
+            $sql5_2 = "SELECT " . implode(', ', $selectFields) . " 
+                    FROM `$tableName`" . 
+                    $whereClause5_2 . 
+                    " ORDER BY year_level, semester, course_code";
+            
+            $result5_2 = $conn->query($sql5_2);
+            
+            if ($result5_2 && $result5_2->num_rows > 0) {
+                while ($row = $result5_2->fetch_assoc()) {
+                    $units = isset($row['total_units']) ? (float)$row['total_units'] : 0;
+                    
+                    $courseData = [
+                        'course_code' => $row['course_code'] ?? '',
+                        'course_title' => $row['course_title'] ?? '',
+                        'lec_units' => $row['lec_units'] ?? 0,
+                        'lab_units' => $row['lab_units'] ?? 0,
+                        'total_units' => $units,
+                        'prerequisites' => $row['prerequisites'] ?? ''
+                    ];
+                    
+                    $courses_5['5-2'][] = $courseData;
+                    $sixth_sem_units += $units;
+                }
+            }
+        } catch (Exception $e) {
+            echo '<!-- Year 5 Error: ' . htmlspecialchars($e->getMessage()) . ' -->';
+            $courses_5 = [
+                '5-1' => [],
+                '5-2' => []
+            ];
+            $fifth_sem_units = 0;
+            $sixth_sem_units = 0;
         }
         ?>
 
@@ -1728,8 +1821,527 @@ if ($hasIrregularCourses) {
         ?>
     </div>
 
+    <!-- Fifth Year Modal -->
+    <div class="modal fade" id="fifthYearModal" tabindex="-1" aria-labelledby="fifthYearModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-fullscreen">
+            <div class="modal-content">
+                <div class="modal-header" style="background-color: #0d6efd; color: white;">
+                    <h5 class="modal-title" id="fifthYearModalLabel">Fifth Year - BSIT Prospectus</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-0" style="background: white;">
+                    <div class="prospectus-container">
+                        <!-- Watermark -->
+                        <div class="watermark">FOR PERSONAL USE ONLY</div>
+                        
+                        <!-- Header Section -->
+                        <div class="header-section">
+                            <div class="logo-section">
+                                <div class="official-logo">
+                                    <img src="chomelogo.png" alt="City College of Calamba Logo" class="logo-image">
+                                </div>
+                                <div class="institution-info">
+                                    <h1>CITY COLLEGE OF CALAMBA</h1>
+                                    <h2>OFFICE OF THE COLLEGE REGISTRAR</h2>
+                                    <p>Old Municipal Site, Brgy. VII, Poblacion, Calamba City, Laguna</p>
+                                    <p>4027 Philippines</p>
+                                </div>
+                            </div>
+                            <div class="barcode-section text-center mb-3">
+                                <div class="barcode-container d-inline-block">
+                                    <svg id="barcode-y5" style="display: block; margin: 0 auto;"></svg>
+                                    <div class="barcode-text small mt-1">ID: <?php echo htmlspecialchars($student['student_id']); ?></div>
+                                    <div class="prospectus-title fw-bold">STUDY LOAD</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="student-info mb-4">
+                            <div class="row">
+                                <div class="program-title">Bachelor of Science in Information Technology</div>
+                                <div class="col-md-6">
+                                    <p><strong>Student Name:</strong> <?php echo htmlspecialchars($student['firstname'] . ' ' . $student['lastname']); ?></p>
+                                    <p><strong>Student no.:</strong> <?php echo htmlspecialchars($student['student_id']); ?></p>
+                                </div>
+                                <div class="col-md-6 text-md-end">
+                                    <p><strong>classification:</strong> <?php echo htmlspecialchars($student['classification']); ?></p>
+                                    <p><strong>Completed Units:</strong> <?php echo $completedUnits; ?></p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="year-title">FIFTH YEAR</div>
+                        
+                        <!-- Fifth Semester -->
+                        <div class="semester">
+                            <div class="semester-title">FIRST SEMESTER</div>
+                            <div class="table-responsive">
+                                <table class="curriculum-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Grade</th>
+                                            <th>Code</th>
+                                            <th>Course Title</th>
+                                            <th>Lec</th>
+                                            <th>Lab</th>
+                                            <th>Units</th>
+                                            <th>Pre-req</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php
+                                        if (empty($courses_5['5-1'])) {
+                                            echo '<tr><td colspan="7" style="text-align: center; padding: 20px;">No courses available for 5-1 semester</td></tr>';
+                                        } else {
+                                            foreach ($courses_5['5-1'] as $course) {
+                                                $subjectCode = trim($course['course_code']);
+                                                $gradeInfo = $gradesByCode[strtoupper($subjectCode)] ?? null;
+                                                $grade = $gradeInfo['grade'] ?? '';
+                                                $gradeClass = 'grade-cell';
+                                                $displayGrade = '-';
+                                                $hasGrade = !empty($grade);
+                                                
+                                                if ($hasGrade) {
+                                                    $gradeUpper = strtoupper($grade);
+                                                    $displayGrade = $grade;
+                                                    
+                                                    if (in_array($gradeUpper, ['PASS', 'PASSED', 'COMPLETE', 'COMPLETED', 'S', 'SA', 'S1', 'S2', 'S3', 'S4'])) {
+                                                        $gradeClass = 'grade-cell passed-grade';
+                                                    } 
+                                                    elseif (in_array($gradeUpper, ['FAIL', 'FAILED', 'F', 'FA', 'U', 'INC', 'INCOMPLETE'])) {
+                                                        $gradeClass = 'grade-cell failed-grade';
+                                                    }
+                                                    elseif (is_numeric($grade)) {
+                                                        $gradeNumeric = floatval($grade);
+                                                        if ($gradeNumeric <= 3.0 && $gradeNumeric >= 1.0) {
+                                                            $displayGrade = number_format($gradeNumeric, 1);
+                                                            $gradeClass = 'grade-cell passed-grade';
+                                                        } elseif ($gradeNumeric >= 3.25 && $gradeNumeric <= 4.0) {
+                                                            $displayGrade = 'INC';
+                                                            $gradeClass = 'grade-cell failed-grade';
+                                                        } elseif ($gradeNumeric >= 5.0) {
+                                                            $displayGrade = 'Failed';
+                                                            $gradeClass = 'grade-cell failed-grade';
+                                                        } else {
+                                                            $displayGrade = number_format($gradeNumeric, 1);
+                                                            $gradeClass = 'grade-cell failed-grade';
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                echo '<tr>';
+                                                echo '<td class="' . $gradeClass . '">' . htmlspecialchars($displayGrade) . '</td>';
+                                                echo '<td>' . htmlspecialchars($subjectCode) . '</td>';
+                                                echo '<td>' . htmlspecialchars($course['course_title'] ?? '') . '</td>';
+                                                echo '<td>' . ($course['lec_units'] ?? '0') . '</td>';
+                                                echo '<td>' . ($course['lab_units'] ?? '0') . '</td>';
+                                                echo '<td>' . ($course['total_units'] ?? '0') . '</td>';
+                                                echo '<td>' . (!empty($course['prerequisites']) ? htmlspecialchars($course['prerequisites']) : '-') . '</td>';
+                                                echo '</tr>';
+                                            }
+                                        }
+                                        ?>
+                                    </tbody>
+                                </table>
+                                <div style="display: flex; justify-content: flex-end; align-items: center; margin: 20px 0; padding: 10px; background-color: #f8f9fa; border-radius: 5px; border-left: 4px solid #0d6efd;">
+                                    <span style="font-weight: bold; margin-right: 10px; font-size: 1.1em;">Total Units: </span>
+                                    <span style="font-weight: bold; font-size: 1.2em; color: #0d6efd;"><?php echo number_format($fifth_sem_units, 1); ?></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Sixth Semester -->
+                        <div class="semester">
+                            <div class="semester-title">SECOND SEMESTER</div>
+                            <div class="table-responsive">
+                                <table class="curriculum-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Grade</th>
+                                            <th>Code</th>
+                                            <th>Course Title</th>
+                                            <th>Lec</th>
+                                            <th>Lab</th>
+                                            <th>Units</th>
+                                            <th>Pre-req</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php
+                                        if (empty($courses_5['5-2'])) {
+                                            echo '<tr><td colspan="7" style="text-align: center; padding: 20px;">No courses available for 5-2 semester</td></tr>';
+                                        } else {
+                                            foreach ($courses_5['5-2'] as $course) {
+                                                $subjectCode = trim($course['course_code']);
+                                                $gradeInfo = $gradesByCode[strtoupper($subjectCode)] ?? null;
+                                                $grade = $gradeInfo['grade'] ?? '';
+                                                $gradeClass = 'grade-cell';
+                                                $displayGrade = '-';
+                                                $hasGrade = !empty($grade);
+                                                
+                                                if ($hasGrade) {
+                                                    $gradeUpper = strtoupper($grade);
+                                                    $displayGrade = $grade;
+                                                    
+                                                    if (in_array($gradeUpper, ['PASS', 'PASSED', 'COMPLETE', 'COMPLETED', 'S', 'SA', 'S1', 'S2', 'S3', 'S4'])) {
+                                                        $gradeClass = 'grade-cell passed-grade';
+                                                    } 
+                                                    elseif (in_array($gradeUpper, ['FAIL', 'FAILED', 'F', 'FA', 'U', 'INC', 'INCOMPLETE'])) {
+                                                        $gradeClass = 'grade-cell failed-grade';
+                                                    }
+                                                    elseif (is_numeric($grade)) {
+                                                        $gradeNumeric = floatval($grade);
+                                                        if ($gradeNumeric <= 3.0 && $gradeNumeric >= 1.0) {
+                                                            $displayGrade = number_format($gradeNumeric, 1);
+                                                            $gradeClass = 'grade-cell passed-grade';
+                                                        } elseif ($gradeNumeric >= 3.25 && $gradeNumeric <= 4.0) {
+                                                            $displayGrade = 'INC';
+                                                            $gradeClass = 'grade-cell failed-grade';
+                                                        } elseif ($gradeNumeric >= 5.0) {
+                                                            $displayGrade = 'Failed';
+                                                            $gradeClass = 'grade-cell failed-grade';
+                                                        } else {
+                                                            $displayGrade = number_format($gradeNumeric, 1);
+                                                            $gradeClass = 'grade-cell failed-grade';
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                echo '<tr>';
+                                                echo '<td class="' . $gradeClass . '">' . htmlspecialchars($displayGrade) . '</td>';
+                                                echo '<td>' . htmlspecialchars($subjectCode) . '</td>';
+                                                echo '<td>' . htmlspecialchars($course['course_title'] ?? '') . '</td>';
+                                                echo '<td>' . ($course['lec_units'] ?? '0') . '</td>';
+                                                echo '<td>' . ($course['lab_units'] ?? '0') . '</td>';
+                                                echo '<td>' . ($course['total_units'] ?? '0') . '</td>';
+                                                echo '<td>' . (!empty($course['prerequisites']) ? htmlspecialchars($course['prerequisites']) : '-') . '</td>';
+                                                echo '</tr>';
+                                            }
+                                        }
+                                        ?>
+                                    </tbody>
+                                </table>
+                                <div style="display: flex; justify-content: flex-end; align-items: center; margin: 20px 0; padding: 10px; background-color: #f8f9fa; border-radius: 5px; border-left: 4px solid #0d6efd;">
+                                    <span style="font-weight: bold; margin-right: 10px; font-size: 1.1em;">Total Units: </span>
+                                    <span style="font-weight: bold; font-size: 1.2em; color: #0d6efd;"><?php echo number_format($sixth_sem_units, 1); ?></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer" style="background-color: #f8f9fa;">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" onclick="printFifthYearProspectus()"><i class="bi bi-printer"></i> Print</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        // Initialize barcode for fifth year modal when modal is shown
+        document.getElementById('fifthYearModal').addEventListener('show.bs.modal', function() {
+            try {
+                JsBarcode('#barcode-y5', '<?php echo $student['student_id']; ?>', {
+                    format: 'CODE128',
+                    width: 1.5,
+                    height: 50,
+                    displayValue: false,
+                    margin: 2,
+                    background: 'transparent',
+                    lineColor: '#000',
+                    valid: function(valid) {
+                        if (!valid) {
+                            JsBarcode('#barcode-y5', 'STD-<?php echo $student['student_id']; ?>', {
+                                format: 'CODE128',
+                                width: 1.5,
+                                height: 50,
+                                displayValue: false,
+                                margin: 2
+                            });
+                        }
+                    }
+                });
+            } catch (e) {
+                console.error('Barcode generation failed:', e);
+            }
+        });
+
+        // Print Fifth Year Prospectus
+        function printFifthYearProspectus() {
+            // Create a new window for printing
+            const printWindow = window.open('', 'Print Fifth Year', 'width=800,height=600');
+            
+            // Get the modal content
+            const modalBody = document.querySelector('#fifthYearModal .modal-body').innerHTML;
+            
+            // Create print HTML with styles
+            const printHTML = `
+                <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>Fifth Year Prospectus</title>
+                    <style>
+                        * {
+                            margin: 0;
+                            padding: 0;
+                            box-sizing: border-box;
+                        }
+                        
+                        @media print {
+                            @page {
+                                size: A4 landscape;
+                                margin: 0.1cm;
+                            }
+                            body {
+                                zoom: 0.75;
+                                -webkit-print-color-adjust: exact;
+                                print-color-adjust: exact;
+                                background: white !important;
+                                font-size: 9px !important;
+                                line-height: 1.1 !important;
+                                margin: 0;
+                                padding: 0;
+                            }
+                        }
+                        
+                        body {
+                            font-family: 'Arial', sans-serif;
+                            background: white;
+                            margin: 0;
+                            padding: 10px;
+                            line-height: 1.4;
+                        }
+                        
+                        .prospectus-container {
+                            max-width: 100%;
+                            margin: 0 auto;
+                            background: white;
+                            position: relative;
+                            min-height: auto;
+                            padding: 20px;
+                            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+                        }
+                        
+                        .header-section {
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: flex-start;
+                            margin-bottom: 40px;
+                            padding-bottom: 25px;
+                        }
+                        
+                        .logo-section {
+                            display: flex;
+                            align-items: center;
+                            gap: 30px;
+                        }
+                        
+                        .official-logo {
+                            position: relative;
+                            width: 80px;
+                            height: 100px;
+                            display: flex;
+                            flex-direction: column;
+                            align-items: center;
+                            justify-content: center;
+                        }
+                        
+                        .logo-image {
+                            width: 70px;
+                            height: 85px;
+                            object-fit: contain;
+                        }
+                        
+                        .institution-info h1 {
+                            font-size: 24px;
+                            font-weight: bold;
+                            margin: 0;
+                            letter-spacing: 1px;
+                        }
+                        
+                        .institution-info h2 {
+                            font-size: 14px;
+                            font-weight: normal;
+                            margin: 5px 0;
+                            color: #333;
+                        }
+                        
+                        .institution-info p {
+                            font-size: 12px;
+                            margin: 2px 0;
+                            color: #666;
+                        }
+                        
+                        #barcode-y5 {
+                            height: 50px;
+                            margin-bottom: 5px;
+                        }
+                        
+                        .barcode-text {
+                            font-size: 10px;
+                            font-family: 'Courier New', monospace;
+                            letter-spacing: 1px;
+                            text-align: center;
+                            margin-bottom: 5px;
+                        }
+                        
+                        .prospectus-title {
+                            font-size: 28px;
+                            font-weight: bold;
+                            text-align: right;
+                            margin-top: 10px;
+                        }
+                        
+                        .program-title {
+                            font-size: 18px;
+                            font-weight: bold;
+                            margin-bottom: 20px;
+                        }
+                        
+                        .student-info {
+                            margin: 20px 0;
+                        }
+                        
+                        .student-info p {
+                            margin: 5px 0;
+                            font-size: 12px;
+                        }
+                        
+                        .year-title {
+                            font-size: 20px;
+                            font-weight: bold;
+                            text-align: center;
+                            margin-bottom: 20px;
+                        }
+                        
+                        .semester {
+                            margin-bottom: 30px;
+                            background: white;
+                            border-radius: 4px;
+                            overflow: hidden;
+                        }
+                        
+                        .semester-title {
+                            font-size: 12px;
+                            font-weight: bold;
+                            text-align: center;
+                            padding-left: 1400px;
+                            background: #003366;
+                            color: white;
+                            padding: 8px;
+                            margin-bottom: 0;
+                            max-width: 1500px;
+                            margin-left: auto;
+                            margin-right: 0;
+                            padding-right: 20px;
+                        }
+                        
+                        .curriculum-table {
+                            width: 100%;
+                            border-collapse: collapse;
+                            font-size: 12px;
+                            border: none;
+                        }
+                        
+                        .curriculum-table th {
+                            background: #0d6efd;
+                            color: white;
+                            padding: 12px 8px;
+                            text-align: center;
+                            font-weight: bold;
+                            border: none;
+                        }
+                        
+                        .curriculum-table th:first-child {
+                            background: transparent !important;
+                            color: transparent !important;
+                        }
+                        
+                        .curriculum-table td {
+                            padding: 10px 8px;
+                            text-align: center;
+                            border: none;
+                            border-bottom: 1px solid #dee2e6;
+                        }
+                        
+                        .curriculum-table .course-title {
+                            text-align: left;
+                            padding-left: 12px;
+                        }
+                        
+                        .grade-cell {
+                            text-align: center;
+                            font-weight: bold;
+                            font-size: 11px;
+                            text-decoration: underline;
+                        }
+                        
+                        .grade-cell.passed-grade {
+                            background-color: #d4edda;
+                            color: #155724;
+                        }
+                        
+                        .grade-cell.failed-grade {
+                            background-color: #f8d7da;
+                            color: #721c24;
+                        }
+                        
+                        .grade-cell.no-grade {
+                            background-color: #f8f9fa;
+                            color: #6c757d;
+                        }
+                        
+                        .watermark {
+                            position: fixed;
+                            top: 50%;
+                            left: 50%;
+                            transform: translate(-50%, -50%) rotate(-45deg);
+                            font-size: 100px;
+                            opacity: 0.1;
+                            pointer-events: none;
+                            font-weight: bold;
+                            color: #ccc;
+                            z-index: 0;
+                        }
+                    </style>
+                </head>
+                <body>
+                    ${modalBody}
+                </body>
+                </html>
+            `;
+            
+            printWindow.document.write(printHTML);
+            printWindow.document.close();
+            
+            // Wait for content to load, then print
+            printWindow.onload = function() {
+                // Try to load the JsBarcode library in the print window
+                const script = printWindow.document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js';
+                script.onload = function() {
+                    try {
+                        printWindow.JsBarcode('#barcode-y5', '<?php echo $student['student_id']; ?>', {
+                            format: 'CODE128',
+                            width: 1.5,
+                            height: 50,
+                            displayValue: false,
+                            margin: 2
+                        });
+                    } catch (e) {
+                        console.log('Barcode generation in print window skipped');
+                    }
+                    setTimeout(() => {
+                        printWindow.print();
+                    }, 500);
+                };
+                printWindow.document.head.appendChild(script);
+            };
+        }
+
         // Toggle mobile menu
         document.getElementById('menuToggle').addEventListener('click', function() {
             document.querySelector('.sidebar').classList.toggle('show');
