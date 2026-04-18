@@ -153,43 +153,24 @@ $conn->close();
         }
         
         body {
-            background: linear-gradient(135deg, #0a1929 0%, #1e3a5f 25%, #2e5490 50%, #1e3a5f 75%, #0a1929 100%);
-            background-size: 400% 400%;
-            animation: gradientShift 15s ease infinite;
+            background: #eef3fb;
             min-height: 100vh;
             font-family: 'Inter', sans-serif;
             display: flex;
             position: relative;
             overflow-x: hidden;
+            color: #111827;
         }
-        
-        @keyframes gradientShift {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-        }
-        
-        /* Floating particles for ambiance */
+
         body::before {
             content: '';
             position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-image: 
-                radial-gradient(circle at 20% 80%, rgba(66, 133, 244, 0.15) 0%, transparent 50%),
-                radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.05) 0%, transparent 50%),
-                radial-gradient(circle at 40% 40%, rgba(66, 133, 244, 0.1) 0%, transparent 50%);
-            animation: float 20s ease-in-out infinite;
+            inset: 0;
             pointer-events: none;
+            background:
+                radial-gradient(circle at top left, rgba(37, 99, 235, 0.10), transparent 28%),
+                radial-gradient(circle at top right, rgba(16, 185, 129, 0.08), transparent 24%);
             z-index: 1;
-        }
-        
-        @keyframes float {
-            0%, 100% { transform: translateY(0px) rotate(0deg); }
-            33% { transform: translateY(-20px) rotate(1deg); }
-            66% { transform: translateY(20px) rotate(-1deg); }
         }
         
         /* Sidebar */
@@ -343,83 +324,89 @@ $conn->close();
         .main-content {
             flex: 1;
             margin-left: 280px;
-            padding: 30px;
+            padding: 16px;
             position: relative;
             z-index: 10;
         }
-        
-        .page-header {
-            margin-bottom: 40px;
-            animation: fadeInDown 0.8s ease-out 0.2s both;
+
+        .dashboard-shell {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            gap: 16px;
         }
         
-        @keyframes fadeInDown {
-            from {
-                opacity: 0;
-                transform: translateY(-20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+        .page-header {
+            margin-bottom: 0;
+            animation: none;
+            background: rgba(255, 255, 255, 0.96);
+            border: 1px solid rgba(229, 231, 235, 0.95);
+            border-radius: 18px;
+            padding: 16px 20px;
+            box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
         }
         
         .page-header h1 {
-            color: white;
+            color: #111827;
             font-weight: 700;
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            font-size: 1.5rem;
+            margin-bottom: 4px;
         }
         
         .page-header p {
-            color: rgba(255, 255, 255, 0.8);
-            font-size: 1.1rem;
+            color: #9ca3af;
+            font-size: 0.92rem;
             margin: 0;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .header-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            border-radius: 12px;
+            background: #fff;
+            border: 1px solid rgba(229, 231, 235, 0.95);
+            color: #6b7280;
+            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+            text-decoration: none;
+            white-space: nowrap;
         }
         
         /* Stats Cards */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 25px;
-            margin-bottom: 40px;
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+            gap: 16px;
+            margin-bottom: 0;
         }
         
         .stat-card {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            padding: 30px;
-            box-shadow: 
-                0 20px 40px rgba(10, 25, 41, 0.3),
-                0 10px 20px rgba(30, 58, 95, 0.2);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(66, 133, 244, 0.2);
+            background: rgba(255, 255, 255, 0.96);
+            border-radius: 14px;
+            padding: 16px 18px;
+            box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+            border: 1px solid rgba(229, 231, 235, 0.95);
             position: relative;
             overflow: hidden;
-            transition: all 0.3s ease;
-            animation: fadeInUp 0.8s ease-out both;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            animation: none;
             cursor: pointer;
             text-decoration: none;
             display: block;
-        }
-        
-        .stat-card:nth-child(1) { animation-delay: 0.1s; }
-        .stat-card:nth-child(2) { animation-delay: 0.2s; }
-        .stat-card:nth-child(3) { animation-delay: 0.3s; }
-        .stat-card:nth-child(4) { animation-delay: 0.4s; }
-        .stat-card:nth-child(5) { animation-delay: 0.5s; }
-        .stat-card:nth-child(6) { animation-delay: 0.6s; }
-        
-        @keyframes fadeInUp {
-            from {
-                opacity: 0;
-                transform: translateY(30px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+            min-height: 112px;
         }
         
         .stat-card::before {
@@ -428,26 +415,24 @@ $conn->close();
             top: 0;
             left: 0;
             width: 100%;
-            height: 4px;
+            height: 3px;
             background: linear-gradient(90deg, #4285f4, #669df6);
         }
         
         .stat-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 
-                0 25px 50px rgba(10, 25, 41, 0.4),
-                0 15px 30px rgba(30, 58, 95, 0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
         }
         
         .stat-icon {
-            width: 60px;
-            height: 60px;
-            border-radius: 15px;
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin-bottom: 20px;
-            font-size: 24px;
+            margin-bottom: 14px;
+            font-size: 18px;
             color: white;
             position: relative;
             overflow: hidden;
@@ -472,71 +457,131 @@ $conn->close();
         .stat-icon.curriculum { background: linear-gradient(135deg, #06b6d4, #22d3ee); }
         
         .stat-value {
-            font-size: 2.5rem;
+            font-size: 2rem;
             font-weight: 700;
-            color: #1e3a5f;
-            margin-bottom: 5px;
+            color: #111827;
+            margin-bottom: 4px;
             line-height: 1;
         }
         
         .stat-label {
-            color: #64748b;
+            color: #6b7280;
             font-weight: 500;
-            font-size: 1rem;
+            font-size: 0.85rem;
         }
         
         /* Chart Container */
         .chart-container {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            padding: 30px;
-            box-shadow: 
-                0 20px 40px rgba(10, 25, 41, 0.3),
-                0 10px 20px rgba(30, 58, 95, 0.2);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(66, 133, 244, 0.2);
-            margin-bottom: 30px;
-            animation: fadeInUp 0.8s ease-out 0.7s both;
+            background: rgba(255, 255, 255, 0.96);
+            border-radius: 14px;
+            padding: 16px;
+            box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+            border: 1px solid rgba(229, 231, 235, 0.95);
+            margin-bottom: 0;
+            animation: none;
         }
         
         .chart-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 25px;
+            margin-bottom: 14px;
         }
         
         .chart-title {
-            font-size: 1.3rem;
+            font-size: 1rem;
             font-weight: 600;
-            color: #1e3a5f;
+            color: #111827;
             margin: 0;
         }
         
         .chart-subtitle {
-            color: #64748b;
-            font-size: 0.9rem;
+            color: #6b7280;
+            font-size: 0.84rem;
             margin: 5px 0 0;
+        }
+
+        .chart-layout {
+            display: grid;
+            grid-template-columns: 1.45fr 1fr;
+            gap: 16px;
+            align-items: start;
+        }
+
+        .chart-panel,
+        .activity-feed {
+            background: rgba(255, 255, 255, 0.96);
+            border-radius: 14px;
+            padding: 16px;
+            box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+            border: 1px solid rgba(229, 231, 235, 0.95);
+        }
+
+        .chart-panel {
+            min-height: 470px;
+        }
+
+        .activity-feed {
+            min-height: 470px;
+        }
+
+        .classification-wrap {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 18px;
+            align-items: center;
+        }
+
+        .classification-stats {
+            display: grid;
+            gap: 14px;
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            gap: 10px;
+        }
+
+        .metric-row .label {
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .metric-row .count {
+            font-weight: 700;
+            font-size: 1.2rem;
+            color: #111827;
+        }
+
+        .progress-track {
+            height: 8px;
+            border-radius: 999px;
+            overflow: hidden;
+            background: #e5e7eb;
+        }
+
+        .progress-bar.regular {
+            background: #34a853;
+        }
+
+        .progress-bar.irregular {
+            background: #ea4335;
+        }
+
+        .summary-box {
+            padding-top: 14px;
+            border-top: 1px solid rgba(229, 231, 235, 0.95);
         }
         
         /* Activity Feed */
-        .activity-feed {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            padding: 30px;
-            box-shadow: 
-                0 20px 40px rgba(10, 25, 41, 0.3),
-                0 10px 20px rgba(30, 58, 95, 0.2);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(66, 133, 244, 0.2);
-            animation: fadeInUp 0.8s ease-out 0.8s both;
-        }
-        
         .activity-item {
             display: flex;
             align-items: flex-start;
             padding: 15px 0;
-            border-bottom: 1px solid rgba(66, 133, 244, 0.1);
+            border-bottom: 1px solid rgba(229, 231, 235, 0.95);
             transition: all 0.3s ease;
         }
         
@@ -545,7 +590,7 @@ $conn->close();
         }
         
         .activity-item:hover {
-            background: rgba(66, 133, 244, 0.05);
+            background: rgba(37, 99, 235, 0.04);
             margin: 0 -10px;
             padding: 15px 10px;
             border-radius: 10px;
@@ -575,13 +620,13 @@ $conn->close();
         }
         
         .activity-text {
-            color: #1e3a5f;
+            color: #111827;
             font-weight: 500;
             margin-bottom: 5px;
         }
         
         .activity-time {
-            color: #64748b;
+            color: #6b7280;
             font-size: 0.85rem;
         }
         
@@ -592,6 +637,11 @@ $conn->close();
             }
             .main-content {
                 margin-left: 250px;
+            }
+            .stats-grid,
+            .chart-layout,
+            .classification-wrap {
+                grid-template-columns: 1fr;
             }
         }
         
@@ -607,6 +657,16 @@ $conn->close();
             }
             .stats-grid {
                 grid-template-columns: 1fr;
+            }
+
+            .page-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .header-actions {
+                width: 100%;
+                justify-content: flex-start;
             }
         }
     </style>
@@ -676,9 +736,22 @@ $conn->close();
     
     <!-- Main Content -->
     <div class="main-content">
+        <div class="dashboard-shell">
         <div class="page-header">
-            <h1>Dashboard Overview</h1>
-            <p>Welcome back! Here's what's happening in your system today.</p>
+            <div>
+                <h1>Dashboard Overview</h1>
+                <p>Welcome back! Here's what's happening in your system today.</p>
+            </div>
+            <div class="header-actions">
+                <div class="header-pill">
+                    <i class="fas fa-sync-alt"></i>
+                    <span>Data refreshed at <?php echo date('M d, Y h:i A'); ?></span>
+                </div>
+                <a href="notification.php" class="header-pill">
+                    <i class="fas fa-bell"></i>
+                    <span>Notifications</span>
+                </a>
+            </div>
         </div>
         
         <!-- Statistics Grid -->
@@ -733,48 +806,47 @@ $conn->close();
         </div>
         
         <!-- Student Classification Chart -->
-        <div class="chart-container">
+        <div class="chart-layout">
+        <div class="chart-panel">
             <div class="chart-header">
                 <div>
                     <h3 class="chart-title">Student Classification Distribution</h3>
-                    <p class="chart-subtitle"></p>
+                    <p class="chart-subtitle">Regular versus irregular student count.</p>
                 </div>
             </div>
-            <div style="display: flex; gap: 30px; align-items: center; flex-wrap: wrap;">
-                <div style="flex: 1; min-width: 300px; max-width: 400px;">
+            <div class="classification-wrap">
+                <div>
                     <canvas id="classificationChart"></canvas>
                 </div>
-                <div style="flex: 1; min-width: 250px;">
-                    <div class="classification-stats">
-                        <div style="margin-bottom: 20px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                <span style="color: #34a853; font-weight: 600; font-size: 1.1rem;">Regular Students</span>
-                                <span style="color: #1e3a5f; font-weight: 700; font-size: 1.3rem;"><?php echo number_format($classification_stats['regular']); ?></span>
-                            </div>
-                            <div style="background: #e8f5e8; height: 8px; border-radius: 4px; overflow: hidden;">
-                                <div style="background: #34a853; height: 100%; width: <?php echo $classification_stats['total'] > 0 ? ($classification_stats['regular'] / $classification_stats['total']) * 100 : 0; ?>%; transition: width 1s ease;"></div>
-                            </div>
-                            <div style="text-align: right; margin-top: 5px; color: #64748b; font-size: 0.9rem;">
-                                <?php echo $classification_stats['total'] > 0 ? round(($classification_stats['regular'] / $classification_stats['total']) * 100, 1) : 0; ?>%
-                            </div>
+                <div class="classification-stats">
+                    <div>
+                        <div class="metric-row">
+                            <span class="label" style="color:#34a853;">Regular Students</span>
+                            <span class="count"><?php echo number_format($classification_stats['regular']); ?></span>
                         </div>
-                        <div style="margin-bottom: 20px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                <span style="color: #ea4335; font-weight: 600; font-size: 1.1rem;">Irregular Students</span>
-                                <span style="color: #1e3a5f; font-weight: 700; font-size: 1.3rem;"><?php echo number_format($classification_stats['irregular']); ?></span>
-                            </div>
-                            <div style="background: #fce8e6; height: 8px; border-radius: 4px; overflow: hidden;">
-                                <div style="background: #ea4335; height: 100%; width: <?php echo $classification_stats['total'] > 0 ? ($classification_stats['irregular'] / $classification_stats['total']) * 100 : 0; ?>%; transition: width 1s ease;"></div>
-                            </div>
-                            <div style="text-align: right; margin-top: 5px; color: #64748b; font-size: 0.9rem;">
-                                <?php echo $classification_stats['total'] > 0 ? round(($classification_stats['irregular'] / $classification_stats['total']) * 100, 1) : 0; ?>%
-                            </div>
+                        <div class="progress-track">
+                            <div class="progress-bar regular" style="height:100%; width: <?php echo $classification_stats['total'] > 0 ? ($classification_stats['regular'] / $classification_stats['total']) * 100 : 0; ?>%;"></div>
                         </div>
-                        <div style="padding-top: 15px; border-top: 1px solid rgba(66, 133, 244, 0.2);">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <span style="color: #1e3a5f; font-weight: 600; font-size: 1.1rem;">Total Students</span>
-                                <span style="color: #1e3a5f; font-weight: 700; font-size: 1.4rem;"><?php echo number_format($classification_stats['total']); ?></span>
-                            </div>
+                        <div style="text-align:right; margin-top:5px; color:#6b7280; font-size:0.88rem;">
+                            <?php echo $classification_stats['total'] > 0 ? round(($classification_stats['regular'] / $classification_stats['total']) * 100, 1) : 0; ?>%
+                        </div>
+                    </div>
+                    <div>
+                        <div class="metric-row">
+                            <span class="label" style="color:#ea4335;">Irregular Students</span>
+                            <span class="count"><?php echo number_format($classification_stats['irregular']); ?></span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-bar irregular" style="height:100%; width: <?php echo $classification_stats['total'] > 0 ? ($classification_stats['irregular'] / $classification_stats['total']) * 100 : 0; ?>%;"></div>
+                        </div>
+                        <div style="text-align:right; margin-top:5px; color:#6b7280; font-size:0.88rem;">
+                            <?php echo $classification_stats['total'] > 0 ? round(($classification_stats['irregular'] / $classification_stats['total']) * 100, 1) : 0; ?>%
+                        </div>
+                    </div>
+                    <div class="summary-box">
+                        <div class="metric-row" style="margin-bottom:0;">
+                            <span class="label" style="color:#111827;">Total Students</span>
+                            <span class="count" style="font-size:1.3rem;"><?php echo number_format($classification_stats['total']); ?></span>
                         </div>
                     </div>
                 </div>
@@ -812,6 +884,7 @@ $conn->close();
             <?php else: ?>
                 <p class="text-muted">No recent activity found.</p>
             <?php endif; ?>
+        </div>
         </div>
     </div>
     

@@ -315,16 +315,16 @@ $conn->close();
   <style>
     :root {
       --bg: #eef3fb;
-      --surface: rgba(255, 255, 255, 0.92);
+      --surface: rgba(255, 255, 255, 0.96);
       --surface-strong: #ffffff;
-      --text: #0f172a;
-      --muted: #64748b;
-      --line: rgba(226, 232, 240, 0.9);
+      --text: #111827;
+      --muted: #6b7280;
+      --line: rgba(229, 231, 235, 0.95);
       --blue: #2563eb;
       --blue-soft: rgba(37, 99, 235, 0.12);
       --green: #059669;
       --orange: #f97316;
-      --shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+      --shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
     }
 
     html, body {
@@ -348,39 +348,40 @@ $conn->close();
 
     .dashboard-main {
       min-height: 100vh;
-      padding: 18px;
+      padding: 16px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), transparent 28%);
     }
 
     .dashboard-shell {
-      max-width: 1220px;
+      max-width: 1400px;
       margin: 0 auto;
       display: grid;
-      gap: 18px;
+      gap: 16px;
     }
 
     .topbar {
       background: var(--surface);
       border: 1px solid var(--line);
-      border-radius: 26px;
-      padding: 18px 22px;
+      border-radius: 18px;
+      padding: 16px 20px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 18px;
       box-shadow: var(--shadow);
-      backdrop-filter: blur(14px);
+      backdrop-filter: blur(10px);
     }
 
     .topbar h1 {
-      font-size: 1.35rem;
-      font-weight: 800;
+      font-size: 1.45rem;
+      font-weight: 700;
       color: var(--text);
-      letter-spacing: -0.02em;
+      letter-spacing: -0.01em;
     }
 
     .topbar p {
       margin-top: 4px;
-      color: var(--muted);
+      color: #9ca3af;
       font-size: 0.92rem;
     }
 
@@ -397,11 +398,11 @@ $conn->close();
       align-items: center;
       gap: 8px;
       padding: 10px 14px;
-      border-radius: 999px;
+      border-radius: 12px;
       background: #fff;
       border: 1px solid var(--line);
       color: var(--muted);
-      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
       text-decoration: none;
       white-space: nowrap;
     }
@@ -412,7 +413,7 @@ $conn->close();
 
     .metric-grid {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(6, minmax(0, 1fr));
       gap: 16px;
     }
 
@@ -426,13 +427,14 @@ $conn->close();
     }
 
     .metric-card {
-      padding: 18px;
-      min-height: 122px;
+      padding: 16px 18px;
+      min-height: 112px;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
       position: relative;
       overflow: hidden;
+      border-radius: 14px;
     }
 
     .metric-card::after {
@@ -448,15 +450,15 @@ $conn->close();
 
     .metric-label {
       font-size: 0.83rem;
-      font-weight: 800;
-      letter-spacing: 0.08em;
-      color: #64748b;
+      font-weight: 700;
+      letter-spacing: 0;
+      color: #4b5563;
       text-transform: uppercase;
     }
 
     .metric-value {
       font-size: 2rem;
-      font-weight: 800;
+      font-weight: 700;
       color: var(--text);
       line-height: 1;
       margin-top: 8px;
@@ -466,7 +468,7 @@ $conn->close();
 
     .metric-note {
       color: var(--muted);
-      font-size: 0.9rem;
+      font-size: 0.84rem;
       line-height: 1.35;
       position: relative;
       z-index: 1;
@@ -475,11 +477,11 @@ $conn->close();
     .metric-icon {
       width: 40px;
       height: 40px;
-      border-radius: 12px;
+      border-radius: 10px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      background: rgba(37, 99, 235, 0.09);
+      background: rgba(37, 99, 235, 0.08);
       color: var(--blue);
       align-self: flex-end;
       position: relative;
@@ -493,13 +495,14 @@ $conn->close();
 
     .dashboard-grid {
       display: grid;
-      grid-template-columns: 1.35fr 1fr;
+      grid-template-columns: 1.25fr 1fr;
       gap: 16px;
       align-items: start;
     }
 
     .panel-card {
-      padding: 18px;
+      padding: 16px;
+      border-radius: 14px;
     }
 
     .panel-header {
@@ -511,24 +514,24 @@ $conn->close();
     }
 
     .panel-title {
-      font-size: 1rem;
-      font-weight: 800;
+      font-size: 0.98rem;
+      font-weight: 700;
       color: var(--text);
     }
 
     .panel-subtitle {
       margin-top: 4px;
-      font-size: 0.9rem;
+      font-size: 0.84rem;
       color: var(--muted);
     }
 
     .panel-badge {
-      padding: 8px 12px;
+      padding: 7px 11px;
       border-radius: 999px;
       background: rgba(5, 150, 105, 0.10);
       color: var(--green);
-      font-size: 0.82rem;
-      font-weight: 800;
+      font-size: 0.78rem;
+      font-weight: 700;
       white-space: nowrap;
     }
 
@@ -555,11 +558,12 @@ $conn->close();
 
     .mini-card {
       padding: 16px;
+      border-radius: 14px;
     }
 
     .mini-card h3 {
-      font-size: 0.95rem;
-      font-weight: 800;
+      font-size: 0.92rem;
+      font-weight: 700;
       color: var(--text);
       margin-bottom: 6px;
     }
@@ -573,7 +577,7 @@ $conn->close();
     .stat-line {
       margin-top: 12px;
       padding: 10px 12px;
-      border-radius: 14px;
+      border-radius: 12px;
       background: #f8fafc;
       border: 1px solid var(--line);
       color: #334155;
@@ -605,6 +609,24 @@ $conn->close();
       backdrop-filter: blur(16px);
     }
 
+    .metric-card.link-card {
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .dashboard-section {
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(229, 231, 235, 0.95);
+      border-radius: 18px;
+      padding: 14px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .dashboard-section + .dashboard-section {
+      margin-top: 0;
+    }
+
     @media (max-width: 1100px) {
       .metric-grid,
       .mini-grid {
@@ -631,6 +653,11 @@ $conn->close();
       .metric-grid,
       .mini-grid {
         grid-template-columns: 1fr;
+      }
+
+      .topbar-actions {
+        width: 100%;
+        justify-content: flex-start;
       }
 
       .chart-frame {
@@ -738,7 +765,8 @@ $conn->close();
         </div>
       </section>
 
-      <section class="metric-grid">
+      <section class="dashboard-section">
+        <div class="metric-grid">
         <div class="metric-card highlight">
           <div class="metric-label">Total Students</div>
           <div class="metric-value"><?php echo number_format($total_students); ?></div>
@@ -751,30 +779,31 @@ $conn->close();
           <div class="metric-note">Curriculum entries in operation.</div>
           <div class="metric-icon"><i class="fas fa-book-open"></i></div>
         </div>
-        <a href="list.php?program=BSIT" class="metric-card block no-underline text-inherit">
+        <a href="list.php?program=BSIT" class="metric-card link-card block no-underline text-inherit">
           <div class="metric-label">BSIT</div>
           <div class="metric-value"><?php echo number_format($bsit_count); ?></div>
           <div class="metric-note">Students enrolled in BSIT.</div>
           <div class="metric-icon"><i class="fas fa-laptop-code"></i></div>
         </a>
-        <a href="list.php?program=BSCS" class="metric-card block no-underline text-inherit">
+        <a href="list.php?program=BSCS" class="metric-card link-card block no-underline text-inherit">
           <div class="metric-label">BSCS</div>
           <div class="metric-value"><?php echo number_format($bscs_count); ?></div>
           <div class="metric-note">Students enrolled in BSCS.</div>
           <div class="metric-icon"><i class="fas fa-microchip"></i></div>
         </a>
-        <a href="regularstu.php" class="metric-card highlight block no-underline text-inherit">
+        <a href="regularstu.php" class="metric-card highlight link-card block no-underline text-inherit">
           <div class="metric-label">Regular Students</div>
           <div class="metric-value"><?php echo number_format($regular_count); ?></div>
           <div class="metric-note">Students classified as regular.</div>
           <div class="metric-icon"><i class="fas fa-user-check"></i></div>
         </a>
-        <a href="irregularstu.php" class="metric-card block no-underline text-inherit">
+        <a href="irregularstu.php" class="metric-card link-card block no-underline text-inherit">
           <div class="metric-label">Irregular Students</div>
           <div class="metric-value"><?php echo number_format($irregular_count); ?></div>
           <div class="metric-note">Students classified as irregular.</div>
           <div class="metric-icon"><i class="fas fa-user-clock"></i></div>
         </a>
+        </div>
       </section>
 
       <section class="dashboard-grid">
