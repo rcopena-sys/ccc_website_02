@@ -85,6 +85,7 @@ $regular_count = 0;
 $irregular_count = 0;
 $gender_counts = ['Male' => 0, 'Female' => 0];
 $academic_years = [];
+$year_level_counts = [1 => 0, 2 => 0, 3 => 0, 4 => 0];
 $enrolled_per_year_sem = [];
 $program_enrollment = [];
 $total_population = 0;
@@ -265,20 +266,40 @@ while ($row = $res->fetch_assoc()) {
     $programs[$row['programs']] = $row['total'];
 }
 
-// Get year-level and classification breakdown
-$year_levels = ['1st', '2nd', '3rd', '4th'];
-$year_level_data = [];
-foreach ($year_levels as $level) {
-    $year_level_data[$level] = ['Regular' => 0, 'Irregular' => 0];
-    $res = $conn->query("SELECT classification, COUNT(*) as total FROM students_db " . ($where_clause ? $where_clause . " AND programs = 'BSIT'" : " WHERE programs = 'BSIT'") . " GROUP BY classification");
-    if ($res) {
-        while ($row = $res->fetch_assoc()) {
-            $classification = ucfirst(strtolower($row['classification'] ?? ''));
-            if (isset($year_level_data[$level][$classification])) {
-                $year_level_data[$level][$classification] = (int)$row['total'];
-            }
-        }
+// Get 1st-4th year student counts from either academic_year or year_level
+$yearLevelColumn = null;
+$yearLevelColumnCheck = $conn->query("SHOW COLUMNS FROM students_db LIKE 'academic_year'");
+if ($yearLevelColumnCheck && $yearLevelColumnCheck->num_rows > 0) {
+  $yearLevelColumn = 'academic_year';
+} else {
+  $yearLevelColumnCheck = $conn->query("SHOW COLUMNS FROM students_db LIKE 'year_level'");
+  if ($yearLevelColumnCheck && $yearLevelColumnCheck->num_rows > 0) {
+    $yearLevelColumn = 'year_level';
+  }
+}
+
+if ($yearLevelColumn !== null) {
+  $yearLevelQuery = "SELECT {$yearLevelColumn} AS year_value FROM students_db" . $where_clause;
+  $yearLevelResult = $conn->query($yearLevelQuery);
+  if ($yearLevelResult) {
+    while ($row = $yearLevelResult->fetch_assoc()) {
+      $rawYear = trim((string)($row['year_value'] ?? ''));
+      if ($rawYear === '') {
+        continue;
+      }
+
+      $normalizedYear = strtolower($rawYear);
+      if (preg_match('/\b(1|1st)\b/', $normalizedYear)) {
+        $year_level_counts[1]++;
+      } elseif (preg_match('/\b(2|2nd)\b/', $normalizedYear)) {
+        $year_level_counts[2]++;
+      } elseif (preg_match('/\b(3|3rd)\b/', $normalizedYear)) {
+        $year_level_counts[3]++;
+      } elseif (preg_match('/\b(4|4th)\b/', $normalizedYear)) {
+        $year_level_counts[4]++;
+      }
     }
+  }
 }
 
 // Close database connection
@@ -292,58 +313,334 @@ $conn->close();
   <title>Dean Dashboard</title> <link rel="icon" type="image/x-icon" href="favicon.ico">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
+    :root {
+      --bg: #eef3fb;
+      --surface: rgba(255, 255, 255, 0.92);
+      --surface-strong: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --line: rgba(226, 232, 240, 0.9);
+      --blue: #2563eb;
+      --blue-soft: rgba(37, 99, 235, 0.12);
+      --green: #059669;
+      --orange: #f97316;
+      --shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+    }
+
+    html, body {
+      min-height: 100%;
+    }
+
+    body {
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(37, 99, 235, 0.10), transparent 28%),
+        radial-gradient(circle at top right, rgba(16, 185, 129, 0.08), transparent 22%),
+        var(--bg);
+    }
+
     #clock {
       font-family: 'Arial', sans-serif;
-      font-size: 1.2rem;
-      font-weight: bold;
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--muted);
+    }
+
+    .dashboard-main {
+      min-height: 100vh;
+      padding: 18px;
+    }
+
+    .dashboard-shell {
+      max-width: 1220px;
+      margin: 0 auto;
+      display: grid;
+      gap: 18px;
+    }
+
+    .topbar {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      padding: 18px 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }
+
+    .topbar h1 {
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: var(--text);
+      letter-spacing: -0.02em;
+    }
+
+    .topbar p {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .pill-action {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .pill-action strong {
+      color: var(--text);
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .metric-card,
+    .panel-card,
+    .mini-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      border-radius: 24px;
+    }
+
+    .metric-card {
+      padding: 18px;
+      min-height: 122px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .metric-card::after {
+      content: '';
+      position: absolute;
+      right: -24px;
+      bottom: -24px;
+      width: 92px;
+      height: 92px;
+      border-radius: 50%;
+      background: rgba(37, 99, 235, 0.06);
+    }
+
+    .metric-label {
+      font-size: 0.83rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      color: #64748b;
+      text-transform: uppercase;
+    }
+
+    .metric-value {
+      font-size: 2rem;
+      font-weight: 800;
+      color: var(--text);
+      line-height: 1;
+      margin-top: 8px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .metric-note {
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.35;
+      position: relative;
+      z-index: 1;
+    }
+
+    .metric-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(37, 99, 235, 0.09);
+      color: var(--blue);
+      align-self: flex-end;
+      position: relative;
+      z-index: 1;
+    }
+
+    .metric-card.highlight .metric-icon {
+      background: rgba(5, 150, 105, 0.10);
+      color: var(--green);
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 1.35fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel-card {
+      padding: 18px;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .panel-title {
+      font-size: 1rem;
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    .panel-subtitle {
+      margin-top: 4px;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    .panel-badge {
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(5, 150, 105, 0.10);
+      color: var(--green);
+      font-size: 0.82rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .chart-frame {
+      width: 100%;
+      height: 410px;
+      position: relative;
+    }
+
+    .chart-frame.small {
+      height: 250px;
+    }
+
+    .right-stack {
+      display: grid;
+      gap: 16px;
+    }
+
+    .mini-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .mini-card {
+      padding: 16px;
+    }
+
+    .mini-card h3 {
+      font-size: 0.95rem;
+      font-weight: 800;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    .mini-card p {
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+
+    .stat-line {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      color: #334155;
+      font-size: 0.9rem;
+    }
+
+    .stat-line strong {
+      color: var(--text);
+    }
+
+    .stat-line.open {
+      background: rgba(5, 150, 105, 0.08);
+      border-color: rgba(5, 150, 105, 0.18);
+      color: #047857;
+    }
+
+    .stat-line.notice {
+      background: rgba(37, 99, 235, 0.08);
+      border-color: rgba(37, 99, 235, 0.18);
+      color: #1d4ed8;
+    }
+
+    .dashboard-bg-card {
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(226, 232, 240, 0.9);
+      border-radius: 30px;
+      padding: 22px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+    }
+
+    @media (max-width: 1100px) {
+      .metric-grid,
+      .mini-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 700px) {
+      .dashboard-main {
+        padding: 12px;
+      }
+
+      .topbar {
+        padding: 16px;
+        border-radius: 22px;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .metric-grid,
+      .mini-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .chart-frame {
+        height: 320px;
+      }
     }
   </style>
 </head>
-<body class="flex bg-blue-100 min-h-screen">
-  <!-- Sidebar Toggle Button -->
-  <button id="sidebarToggle" class="fixed top-4 left-4 z-50 bg-transparent p-2 focus:outline-none hover:bg-white hover:bg-opacity-20 rounded transition-colors">
-    <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path>
-    </svg>
-  </button>
-
-  <!-- User Profile and Navigation -->
-  <div class="fixed top-4 right-4 flex items-center space-x-4">
-    <!-- Notification Bell -->
-    <div class="relative">
-      <a href="notification_page.php" class="text-blue-600 hover:text-blue-800 focus:outline-none relative">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-        </svg>
-        <?php if ($unread_count > 0): ?>
-          <span class="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
-            <?php echo $unread_count; ?>
-          </span>
-        <?php endif; ?>
-      </a>
-    </div>
-    <div class="relative group">
-      <button class="flex items-center space-x-2 focus:outline-none">
-        <img src="<?php echo !empty($user['profile_image']) ? 'uploads/' . htmlspecialchars($user['profile_image']) : 'default-avatar.png'; ?>" 
-             alt="<?php echo htmlspecialchars($user['firstname'] . ' ' . $user['lastname']); ?>"
-             class="w-10 h-10 rounded-full border-2 border-blue-500">
-        <span class="text-blue-700 font-medium"><?php echo htmlspecialchars($user['firstname']); ?></span>
-        <i class="fas fa-chevron-down text-blue-600"></i>
-      </button>
-      <div class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50 hidden group-hover:block">
-        <a href="profile.php" class="block px-4 py-2 text-sm text-gray-700 hover:bg-blue-50">
-          <i class="fas fa-user mr-2"></i> Profile
-        </a>
-        <a href="settings.php" class="block px-4 py-2 text-sm text-gray-700 hover:bg-blue-50">
-          <i class="fas fa-cog mr-2"></i> Settings
-        </a>
-        <a href="../logout.php" class="block px-4 py-2 text-sm text-gray-700 hover:bg-blue-50">
-          <i class="fas fa-sign-out-alt mr-2"></i> Logout
-        </a>
-    
-      </div>
-    </div>
-  </div>
+<body>
+  <div class="flex min-h-screen">
   <!-- Sidebar -->
  <aside id="sidebar" class="w-64 bg-blue-600 text-white p-6 flex flex-col transform transition-transform duration-300 ease-in-out">
     <div class="flex flex-col items-center">
@@ -416,438 +713,329 @@ $conn->close();
   </aside>
 
   <!-- Main Content -->
-  <main class="flex-1 p-10 relative" style="background-image: url('cccd.jpg'); background-size: cover; background-position: center; background-attachment: fixed; background-repeat: no-repeat;">
-  <div class="absolute top-4 right-48 flex items-center space-x-4">
-    <div class="flex items-center space-x-4">
-      <a href="notification_page.php" class="bg-white bg-opacity-70 p-2 rounded-full shadow hover:bg-opacity-100 transition-all duration-200 relative">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-        </svg>
-      </a>
-      <div id="clock" class="bg-white bg-opacity-70 px-4 py-2 rounded shadow"></div>
-    </div>
-  </div>
-  </div>
-
-  <div class="bg-white bg-opacity-90 rounded-lg p-6 shadow-md">
-    <div class="flex justify-center mb-6">
-      <img src="dci.png.png" alt="DCI Logo" class="h-32 w-auto">
-    </div>
-    <h1 class="text-3xl font-bold text-center text-blue-600 mb-8">Department of Computing and Informatics</h1>
-
-    <!-- Dashboard Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mt-10">
-      <div class="bg-white text-blue-600 border-2 border-blue-600 p-6 rounded-lg shadow-lg">
-        <div class="text-xl font-semibold">Total Students</div>
-        <div class="text-3xl font-bold mt-2"><?php echo $total_students; ?></div>
-      </div>
-      <div class="bg-white text-blue-600 border-2 border-blue-600 p-6 rounded-lg shadow-lg">
-        <div class="text-xl font-semibold">Curriculum</div>
-        <div class="text-3xl font-bold mt-2"><?php echo $curriculum_count; ?></div>
-      </div>
-      <a href="list.php?program=BSIT" class="bg-white text-blue-600 border-2 border-blue-600 p-6 rounded-lg shadow-lg block hover:bg-blue-50 transition">
-        <div class="text-xl font-semibold">BSIT</div>
-        <div class="text-3xl font-bold mt-2">
-          <?php echo $bsit_count ?? 0; ?>
-        </div>
-      </a>
-      <a href="list.php?program=BSCS" class="bg-white text-blue-600 border-2 border-blue-600 p-6 rounded-lg shadow-lg block hover:bg-blue-50 transition">
-        <div class="text-xl font-semibold">BSCS</div>
-        <div class="text-3xl font-bold mt-2">
-          <?php echo $bscs_count ?? 0; ?>
-        </div>
-      </a>
-    </div>
-
-    <!-- Additional Statistics Section -->
-    <div class="bg-white bg-opacity-90 rounded-lg p-6 shadow-md mt-10" style="position: relative; z-index: 10;">
-      <h2 class="text-2xl font-bold text-blue-600 mb-6">Statistics Overview</h2>
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <div class="bg-blue-50 p-4 rounded shadow">
-          <div class="text-lg font-semibold text-blue-700">Curriculum in Operation</div>
-          <div class="text-2xl font-bold mt-2"><?php echo $curriculum_count; ?></div>
-        </div>
-        <div class="bg-blue-50 p-4 rounded shadow">
-          <div class="text-lg font-semibold text-blue-700">Total Population</div>
-          <div class="text-2xl font-bold mt-2"><?php echo number_format($total_population); ?></div>
-        </div>
-         <a href="regularstu.php" class="block bg-blue-50 p-4 rounded shadow hover:bg-blue-100 transition duration-200 transform hover:scale-105">
-          <div class="text-lg font-semibold text-blue-700">Regular Students</div>
-          <div class="text-2xl font-bold mt-2">
-            <?php echo number_format($regular_count); ?>
-          </div>
-        </a>
-        <a href="irregularstu.php" class="block bg-blue-50 p-4 rounded shadow hover:bg-blue-100 transition duration-200 transform hover:scale-105">
-          <div class="text-lg font-semibold text-blue-700">Irregular Students</div>
-          <div class="text-2xl font-bold mt-2">
-            <?php echo number_format($irregular_count); ?>
-          </div>
-        </a>
-       
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+  <main class="dashboard-main flex-1">
+    <div class="dashboard-shell">
+      <section class="topbar">
         <div>
-         
-          
-              
-            </tbody>
-          </table>
+          <h1>Dean Dashboard</h1>
+          <p>Department of Computing and Informatics</p>
         </div>
-        <div>
-          <h3 class="text-lg font-semibold text-blue-700 mb-2">Gender Distribution</h3>
-          <canvas id="genderPieChart" width="300" height="300"></canvas>
+        <div class="topbar-actions">
+          <div class="pill-action">
+            <i class="fas fa-sync-alt"></i>
+            <span>Data refreshed at <?php echo date('M d, Y h:i A'); ?></span>
+          </div>
+          <a href="notification_page.php" class="pill-action relative">
+            <i class="fas fa-bell"></i>
+            <span>Notifications</span>
+            <?php if ($unread_count > 0): ?>
+              <strong class="ml-1 text-red-500"><?php echo $unread_count; ?></strong>
+            <?php endif; ?>
+          </a>
+          <button type="button" class="pill-action" aria-label="More options">
+            <i class="fas fa-ellipsis-h"></i>
+          </button>
         </div>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-       
-            </thead>
-           
-          </table>
+      </section>
+
+      <section class="metric-grid">
+        <div class="metric-card highlight">
+          <div class="metric-label">Total Students</div>
+          <div class="metric-value"><?php echo number_format($total_students); ?></div>
+          <div class="metric-note">Combined BSIT and BSCS student count.</div>
+          <div class="metric-icon"><i class="fas fa-users"></i></div>
         </div>
-      </div>
-    </div>
-    <div class="bg-white bg-opacity-90 rounded-lg p-6 shadow-md mt-10 sticky top-0">
-      <h2 class="text-2xl font-bold text-blue-600 mb-6">Year Level Regular/Irregular Pie Charts</h2>
-      <div class="flex flex-wrap gap-8 justify-center">
-        <?php foreach ($year_levels as $level): ?>
-          <div class="bg-white p-4 rounded shadow" style="position: relative;">
-            <h3 class="font-semibold text-center mb-2"><?php echo $level; ?> Year</h3>
-            <div class="h-48" style="position: relative;">
-              <canvas id="pie_<?php echo $level; ?>"></canvas>
+        <div class="metric-card">
+          <div class="metric-label">Curriculum</div>
+          <div class="metric-value"><?php echo number_format($curriculum_count); ?></div>
+          <div class="metric-note">Curriculum entries in operation.</div>
+          <div class="metric-icon"><i class="fas fa-book-open"></i></div>
+        </div>
+        <a href="list.php?program=BSIT" class="metric-card block no-underline text-inherit">
+          <div class="metric-label">BSIT</div>
+          <div class="metric-value"><?php echo number_format($bsit_count); ?></div>
+          <div class="metric-note">Students enrolled in BSIT.</div>
+          <div class="metric-icon"><i class="fas fa-laptop-code"></i></div>
+        </a>
+        <a href="list.php?program=BSCS" class="metric-card block no-underline text-inherit">
+          <div class="metric-label">BSCS</div>
+          <div class="metric-value"><?php echo number_format($bscs_count); ?></div>
+          <div class="metric-note">Students enrolled in BSCS.</div>
+          <div class="metric-icon"><i class="fas fa-microchip"></i></div>
+        </a>
+        <a href="regularstu.php" class="metric-card highlight block no-underline text-inherit">
+          <div class="metric-label">Regular Students</div>
+          <div class="metric-value"><?php echo number_format($regular_count); ?></div>
+          <div class="metric-note">Students classified as regular.</div>
+          <div class="metric-icon"><i class="fas fa-user-check"></i></div>
+        </a>
+        <a href="irregularstu.php" class="metric-card block no-underline text-inherit">
+          <div class="metric-label">Irregular Students</div>
+          <div class="metric-value"><?php echo number_format($irregular_count); ?></div>
+          <div class="metric-note">Students classified as irregular.</div>
+          <div class="metric-icon"><i class="fas fa-user-clock"></i></div>
+        </a>
+      </section>
+
+      <section class="dashboard-grid">
+        <div class="panel-card">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Student Population by Program</div>
+              <div class="panel-subtitle">Distribution of BSIT, BSCS, and total students.</div>
+            </div>
+            <div class="panel-badge">Interactive</div>
+          </div>
+          <div class="chart-frame">
+            <canvas id="programChart"></canvas>
+          </div>
+        </div>
+
+        <div class="right-stack">
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Classification Distribution</div>
+                <div class="panel-subtitle">Regular versus irregular student count.</div>
+              </div>
+              <div class="panel-badge">Live</div>
+            </div>
+            <div class="chart-frame small">
+              <canvas id="classificationChart"></canvas>
             </div>
           </div>
-        <?php endforeach; ?>
-      </div>
+
+          <div class="mini-grid">
+            <div class="mini-card">
+              <h3>Gender Distribution</h3>
+              <p>Breakdown of student gender count in the current filter scope.</p>
+              <div class="chart-frame small">
+                <canvas id="genderPieChart"></canvas>
+              </div>
+            </div>
+            <div class="mini-card">
+              <h3>Academic Summary</h3>
+              <p>Quick figures for the current dashboard context.</p>
+              <div class="stat-line notice"><strong>Total Population:</strong> <?php echo number_format($total_population); ?></div>
+              <div class="stat-line open"><strong>Fiscal Years:</strong> <?php echo number_format($fiscal_year_count); ?></div>
+              <div class="stat-line"><strong>Feedback:</strong> <?php echo number_format($feedback_count); ?></div>
+              <div class="stat-line" style="margin-bottom:0;"><strong>Scope:</strong> <?php echo $selected_fiscal_year ? htmlspecialchars($selected_fiscal_year) : 'All Years'; ?></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel-card">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Year Level Breakdown</div>
+            <div class="panel-subtitle">Counts of 1st, 2nd, 3rd, and 4th year students.</div>
+          </div>
+          <div class="panel-badge">Overview</div>
+        </div>
+        <div class="chart-frame">
+          <canvas id="yearLevelChart"></canvas>
+        </div>
+      </section>
     </div>
-    <!-- End Additional Statistics Section -->
+  </main>
+
   </div>
-</main>
-
-  <!-- Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  
-  <!-- Feedback Notifications -->
-  
-  
-  <style>
-    /* Smooth transitions for the sidebar and main content */
-    #sidebar {
-      transition: transform 0.3s ease-in-out;
-    }
-    #sidebar.collapsed {
-      transform: translateX(-100%);
-    }
-    main {
-      transition: margin 0.3s ease-in-out;
-    }
-    main.expanded {
-      margin-left: 0;
-    }
-  </style>
-  
-  <!-- Font Awesome Icons -->
-  <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
-  
-  <!-- Clock Script -->
-  <script>
-    // Sidebar toggle functionality
-    document.addEventListener('DOMContentLoaded', function() {
-      const sidebar = document.getElementById('sidebar');
-      const sidebarToggle = document.getElementById('sidebarToggle');
-      const mainContent = document.querySelector('main');
-      
-      // Toggle sidebar on button click
-      sidebarToggle.addEventListener('click', function() {
-        sidebar.classList.toggle('collapsed');
-        mainContent.classList.toggle('expanded');
-      });
-
-      // Close sidebar when clicking outside on mobile
-      document.addEventListener('click', function(event) {
-        const isClickInside = sidebar.contains(event.target) || sidebarToggle.contains(event.target);
-        if (!isClickInside && window.innerWidth <= 768) {
-          sidebar.classList.add('collapsed');
-          mainContent.classList.add('expanded');
-        }
-      });
-
-      // Handle window resize
-      function handleResize() {
-        if (window.innerWidth > 768) {
-          sidebar.classList.remove('collapsed');
-          mainContent.classList.remove('expanded');
-        } else {
-          sidebar.classList.add('collapsed');
-          mainContent.classList.add('expanded');
-        }
-      }
-      
-      // Initial check on load
-      handleResize();
-      window.addEventListener('resize', handleResize);
-
-      // Initialize charts when the DOM is fully loaded
-      // Gender Distribution Chart
-      const genderCtx = document.getElementById('genderChart').getContext('2d');
-      new Chart(genderCtx, {
-        type: 'pie',
-        data: {
-          labels: [
-            'Male (<?php echo $gender_counts['Male']; ?>)', 
-            'Female (<?php echo $gender_counts['Female']; ?>)'
-          ],
-          datasets: [{
-            data: [
-              <?php echo $gender_counts['Male']; ?>, 
-              <?php echo $gender_counts['Female']; ?>
-            ],
-            backgroundColor: [
-              'rgba(54, 162, 235, 0.7)',
-              'rgba(255, 99, 132, 0.7)'
-            ],
-            borderColor: [
-              'rgba(54, 162, 235, 1)',
-              'rgba(255, 99, 132, 1)'
-            ],
-            borderWidth: 1
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'bottom'
-            },
-            tooltip: {
-              callbacks: {
-                label: function(context) {
-                  const label = context.label || '';
-                  const value = context.raw || 0;
-                  const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                  const percentage = Math.round((value / total) * 100);
-                  return `${label}: ${value} (${percentage}%)`;
-                }
-              }
-            }
-          }
-        }
-      });
-
-      // Program Enrollment Chart
-      const programCtx = document.getElementById('programChart').getContext('2d');
-      new Chart(programCtx, {
-        type: 'pie',
-        data: {
-          labels: [
-            'BSCS (<?php echo $bscs_count; ?>)', 
-            'BSIT (<?php echo $bsit_count; ?>)'
-          ],
-          datasets: [{
-            data: [
-              <?php echo $bscs_count; ?>, 
-              <?php echo $bsit_count; ?>
-            ],
-            backgroundColor: [
-              'rgba(75, 192, 192, 0.7)',
-              'rgba(153, 102, 255, 0.7)'
-            ],
-            borderColor: [
-              'rgba(75, 192, 192, 1)',
-              'rgba(153, 102, 255, 1)'
-            ],
-            borderWidth: 1
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'bottom'
-            },
-            tooltip: {
-              callbacks: {
-                label: function(context) {
-                  const label = context.label || '';
-                  const value = context.raw || 0;
-                  const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                  const percentage = Math.round((value / total) * 100);
-                  return `${label}: ${value} (${percentage}%)`;
-                }
-              }
-            }
-          }
-        }
-      });
-
-      // Student Status Chart
-      const statusCtx = document.getElementById('statusChart').getContext('2d');
-      new Chart(statusCtx, {
-        type: 'pie',
-        data: {
-          labels: [
-            'Regular (<?php echo $regular_count; ?>)', 
-            'Irregular (<?php echo $irregular_count; ?>)'
-          ],
-          datasets: [{
-            data: [
-              <?php echo $regular_count; ?>, 
-              <?php echo $irregular_count; ?>
-            ],
-            backgroundColor: [
-              'rgba(75, 192, 192, 0.7)',
-              'rgba(255, 159, 64, 0.7)'
-            ],
-            borderColor: ['rgba(75, 192, 192, 1)', 'rgba(255, 159, 64, 1)'],
-            borderWidth: 1
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { position: 'bottom' },
-            tooltip: {
-              callbacks: {
-                label: function(context) {
-                  const label = context.label || '';
-                  const value = context.raw || 0;
-                  const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                  const percentage = Math.round((value / total) * 100);
-                  return `${label}: ${value} (${percentage}%)`;
-                }
-              }
-            }
-          }
-        }
-      });
-    });
-
-    function updateClock() {
-      const now = new Date();
-      const timeString = now.toLocaleTimeString('en-US', { 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        second: '2-digit',
-        hour12: true 
-      });
-      document.getElementById('clock').textContent = timeString;
-    }
-    
-    // Update clock immediately and then every second
-    updateClock();
-    setInterval(updateClock, 1000);
-
-    // Student Dropdown
-    const btn = document.getElementById('studentDropdownBtn');
-    const menu = document.getElementById('studentDropdownMenu');
-    const icon = document.getElementById('dropdownIcon');
-    
-    btn.addEventListener('click', function(e) {
-      e.preventDefault();
-      menu.classList.toggle('hidden');
-      icon.classList.toggle('rotate-180');
-    });
-
-    // Curriculum Dropdown
-    const curriculumBtn = document.getElementById('curriculumDropdownBtn');
-    const curriculumMenu = document.getElementById('curriculumDropdownMenu');
-    const curriculumIcon = document.getElementById('curriculumDropdownIcon');
-
-    if (curriculumBtn) {
-      curriculumBtn.addEventListener('click', function(e) {
-        e.preventDefault();
-        curriculumMenu.classList.toggle('hidden');
-        curriculumIcon.classList.toggle('rotate-180');
-      });
-    }
-
-    // Fiscal Year Dropdown
-    const fiscalYearBtn = document.getElementById('fiscalYearDropdownBtn');
-    const fiscalYearMenu = document.getElementById('fiscalYearDropdownMenu');
-    const fiscalYearIcon = document.getElementById('fiscalYearDropdownIcon');
-
-    fiscalYearBtn.addEventListener('click', function(e) {
-      e.preventDefault();
-      fiscalYearMenu.classList.toggle('hidden');
-      fiscalYearIcon.classList.toggle('rotate-180');
-    });
-    // Close dropdowns when clicking outside
-    document.addEventListener('click', function(event) {
-      if (!btn.contains(event.target) && !menu.contains(event.target)) {
-        menu.classList.add('hidden');
-        icon.classList.remove('rotate-180');
-      }
-      if (curriculumBtn && !curriculumBtn.contains(event.target) && !curriculumMenu.contains(event.target)) {
-        curriculumMenu.classList.add('hidden');
-        curriculumIcon.classList.remove('rotate-180');
-      }
-    });
-
-    // Initialize the feedback notification system
-  
-      
-      {
-        // This will be populated by feedback-notifications.js
-      }
-    ;
-  </script>
-
-  <!-- Chart.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
-    // Gender Pie Chart
-    const ctx = document.getElementById('genderPieChart').getContext('2d');
-    const genderPieChart = new Chart(ctx, {
-      type: 'pie',
-      data: {
-        labels: ['Male', 'Female'],
-        datasets: [{
-          data: [<?php echo $gender_counts['Male']; ?>, <?php echo $gender_counts['Female']; ?>],
-          backgroundColor: ['#3b82f6', '#f472b6'],
-        }]
-      },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: {
-            position: 'bottom',
-          },
-        },
-      },
-    });
+    document.addEventListener('DOMContentLoaded', function () {
+      function updateClock() {
+        const now = new Date();
+        const timeString = now.toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: true
+        });
 
-    // Initialize year level charts
-    document.addEventListener('DOMContentLoaded', function() {
-      <?php if (isset($year_levels) && is_array($year_levels)): ?>
-      <?php foreach ($year_levels as $level): ?>
-      const ctx_<?php echo $level; ?> = document.getElementById('pie_<?php echo $level; ?>');
-      if (ctx_<?php echo $level; ?>) {
-        new Chart(ctx_<?php echo $level; ?>, {
-          type: 'pie',
+        const clock = document.getElementById('clock');
+        if (clock) {
+          clock.textContent = timeString;
+        }
+      }
+
+      updateClock();
+      setInterval(updateClock, 1000);
+
+      const studentBtn = document.getElementById('studentDropdownBtn');
+      const studentMenu = document.getElementById('studentDropdownMenu');
+      const studentIcon = document.getElementById('dropdownIcon');
+
+      if (studentBtn && studentMenu && studentIcon) {
+        studentBtn.addEventListener('click', function (event) {
+          event.preventDefault();
+          studentMenu.classList.toggle('hidden');
+          studentIcon.classList.toggle('rotate-180');
+        });
+      }
+
+      const curriculumBtn = document.getElementById('curriculumDropdownBtn');
+      const curriculumMenu = document.getElementById('curriculumDropdownMenu');
+      const curriculumIcon = document.getElementById('curriculumDropdownIcon');
+
+      if (curriculumBtn && curriculumMenu && curriculumIcon) {
+        curriculumBtn.addEventListener('click', function (event) {
+          event.preventDefault();
+          curriculumMenu.classList.toggle('hidden');
+          curriculumIcon.classList.toggle('rotate-180');
+        });
+      }
+
+      const fiscalYearBtn = document.getElementById('fiscalYearDropdownBtn');
+      const fiscalYearMenu = document.getElementById('fiscalYearDropdownMenu');
+      const fiscalYearIcon = document.getElementById('fiscalYearDropdownIcon');
+
+      if (fiscalYearBtn && fiscalYearMenu && fiscalYearIcon) {
+        fiscalYearBtn.addEventListener('click', function (event) {
+          event.preventDefault();
+          fiscalYearMenu.classList.toggle('hidden');
+          fiscalYearIcon.classList.toggle('rotate-180');
+        });
+      }
+
+      document.addEventListener('click', function (event) {
+        if (studentBtn && studentMenu && !studentBtn.contains(event.target) && !studentMenu.contains(event.target)) {
+          studentMenu.classList.add('hidden');
+          studentIcon.classList.remove('rotate-180');
+        }
+
+        if (curriculumBtn && curriculumMenu && !curriculumBtn.contains(event.target) && !curriculumMenu.contains(event.target)) {
+          curriculumMenu.classList.add('hidden');
+          curriculumIcon.classList.remove('rotate-180');
+        }
+
+        if (fiscalYearBtn && fiscalYearMenu && !fiscalYearBtn.contains(event.target) && !fiscalYearMenu.contains(event.target)) {
+          fiscalYearMenu.classList.add('hidden');
+          fiscalYearIcon.classList.remove('rotate-180');
+        }
+      });
+
+      const programCanvas = document.getElementById('programChart');
+      if (programCanvas) {
+        new Chart(programCanvas, {
+          type: 'bar',
           data: {
-            labels: ['Regular', 'Irregular'],
+            labels: ['BSIT', 'BSCS', 'Total Students'],
             datasets: [{
-              data: [<?php echo $year_level_data[$level]['Regular'] ?? 0; ?>, <?php echo $year_level_data[$level]['Irregular'] ?? 0; ?>],
-              backgroundColor: ['#3b82f6', '#f472b6'],
+              label: 'Students',
+              data: [<?php echo (int)$bsit_count; ?>, <?php echo (int)$bscs_count; ?>, <?php echo (int)$total_students; ?>],
+              backgroundColor: ['rgba(37, 99, 235, 0.82)', 'rgba(16, 185, 129, 0.82)', 'rgba(139, 92, 246, 0.82)'],
+              borderRadius: 10,
+              borderWidth: 0
             }]
           },
           options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { 
+            plugins: {
+              legend: { display: false }
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                ticks: { precision: 0 }
+              }
+            }
+          }
+        });
+      }
+
+      const classificationCanvas = document.getElementById('classificationChart');
+      if (classificationCanvas) {
+        new Chart(classificationCanvas, {
+          type: 'bar',
+          data: {
+            labels: ['Regular', 'Irregular'],
+            datasets: [{
+              label: 'Students',
+              data: [<?php echo (int)$regular_count; ?>, <?php echo (int)$irregular_count; ?>],
+              backgroundColor: ['rgba(5, 150, 105, 0.82)', 'rgba(249, 115, 22, 0.82)'],
+              borderRadius: 10,
+              borderWidth: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false }
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                ticks: { precision: 0 }
+              }
+            }
+          }
+        });
+      }
+
+      const genderCanvas = document.getElementById('genderPieChart');
+      if (genderCanvas) {
+        new Chart(genderCanvas, {
+          type: 'doughnut',
+          data: {
+            labels: ['Male', 'Female'],
+            datasets: [{
+              data: [<?php echo (int)$gender_counts['Male']; ?>, <?php echo (int)$gender_counts['Female']; ?>],
+              backgroundColor: ['rgba(37, 99, 235, 0.82)', 'rgba(244, 114, 182, 0.82)'],
+              borderWidth: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '68%',
+            plugins: {
               legend: { position: 'bottom' }
             }
           }
         });
       }
-      <?php endforeach; ?>
-      <?php endif; ?>
+
+      const yearLevelCanvas = document.getElementById('yearLevelChart');
+      if (yearLevelCanvas) {
+        const yearLevelLabels = ['1st Year', '2nd Year', '3rd Year', '4th Year'];
+        const yearLevelCounts = [
+          <?php echo (int)$year_level_counts[1]; ?>,
+          <?php echo (int)$year_level_counts[2]; ?>,
+          <?php echo (int)$year_level_counts[3]; ?>,
+          <?php echo (int)$year_level_counts[4]; ?>
+        ];
+
+        new Chart(yearLevelCanvas, {
+          type: 'bar',
+          data: {
+            labels: yearLevelLabels,
+            datasets: [{
+              label: 'Students',
+              data: yearLevelCounts,
+              backgroundColor: 'rgba(96, 165, 250, 0.82)',
+              borderRadius: 10,
+              borderWidth: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false }
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                ticks: { precision: 0 }
+              }
+            }
+          }
+        });
+      }
     });
   </script>
-  
-  <!-- Feedback Notifications -->
-  
 </body>
 </html>
