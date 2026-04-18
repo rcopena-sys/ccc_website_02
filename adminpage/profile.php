@@ -23,6 +23,7 @@ $stmt->bind_param("i", $user_id);
 $stmt->execute();
 $result = $stmt->get_result();
 $user = $result->fetch_assoc();
+$signature_swal_message = '';
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -197,6 +198,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         // Set appropriate message based on whether signature was uploaded
                         if (isset($signature_upload_success) && $signature_upload_success) {
                             $message = 'Profile updated successfully with new signature!';
+                            $signature_swal_message = 'Your e-signature has been updated successfully.';
                         } else {
                             $message = 'Profile updated successfully';
                         }
@@ -210,15 +212,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $result = $refreshStmt->get_result();
                         $user = $result->fetch_assoc();
                         $refreshStmt->close();
-                        
-                        // TEMPORARY DEBUG: Show what's actually in the database
-                        echo "<div style='background: #d1ecf1; padding: 10px; margin: 10px; border: 1px solid #bee5eb; border-radius: 4px;'>";
-                        echo "<h5 style='color: #0c5460; margin: 0 0 10px 0;'>DATABASE VERIFICATION:</h5>";
-                        echo "<p style='margin: 5px 0;'><strong>User ID:</strong> " . $user_id . "</p>";
-                        echo "<p style='margin: 5px 0;'><strong>E-signature in database:</strong> '" . ($user['esignature'] ?: 'NULL') . "'</p>";
-                        echo "<p style='margin: 5px 0;'><strong>Expected filename:</strong> '" . $esignature_filename . "'</p>";
-                        echo "<p style='margin: 5px 0;'><strong>File exists:</strong> " . (file_exists('uploads/esignatures/' . $user['esignature']) ? 'YES' : 'NO') . "</p>";
-                        echo "</div>";
                     } else {
                         error_log('Profile update error: ' . $stmt->error);
                         error_log('SQL that failed: ' . $update_sql);
@@ -251,6 +244,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <title>My Profile</title> <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
         body {
             background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #1e3c72 100%);
@@ -587,6 +581,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </form>
         </div>
     </div>
+
+    <?php if ($success && !empty($signature_swal_message)): ?>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            Swal.fire({
+                icon: 'success',
+                title: 'Signature Updated',
+                text: <?= json_encode($signature_swal_message) ?>,
+                confirmButtonText: 'OK',
+                confirmButtonColor: '#1e3c72'
+            });
+        });
+    </script>
+    <?php endif; ?>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>

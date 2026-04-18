@@ -427,13 +427,49 @@ function calculateFailedUnitsForStudent(mysqli $conn, string $studentId): float 
 }
 
 function classificationByFailedUnits(float $failedUnits): ?string {
-  if ($failedUnits >= 6.25) {
+  if ($failedUnits > 6.00) {
     return 'Dismissal';
   }
   if ($failedUnits >= 6.00) {
     return 'Probationary';
   }
   return null;
+}
+
+function resolveStudentClassification(mysqli $conn, string $studentId): string {
+  $failedUnits = calculateFailedUnitsForStudent($conn, $studentId);
+  $ruleClassification = classificationByFailedUnits($failedUnits);
+
+  if ($ruleClassification !== null) {
+    return $ruleClassification;
+  }
+
+  $currentYear = (int)($GLOBALS['currentYear'] ?? date('Y'));
+  $currentSem = (int)($GLOBALS['currentSem'] ?? 1);
+
+  return checkIrregularStatus($conn, $studentId, $currentYear, $currentSem) ? 'Irregular' : 'Regular';
+}
+
+function syncStudentClassification(mysqli $conn, string $studentId, string $classification): void {
+  if ($studentId === '' || $classification === '') {
+    return;
+  }
+
+  $updateSigninStmt = $conn->prepare("UPDATE signin_db SET classification = ? WHERE student_id = ? AND (classification IS NULL OR classification <> ?)");
+  if ($updateSigninStmt) {
+    $updateSigninStmt->bind_param('sss', $classification, $studentId, $classification);
+    $updateSigninStmt->execute();
+    $updateSigninStmt->close();
+  }
+
+  if (columnExists($conn, 'students_db', 'classification')) {
+    $updateStudentsStmt = $conn->prepare("UPDATE students_db SET classification = ? WHERE student_id = ? AND (classification IS NULL OR classification <> ?)");
+    if ($updateStudentsStmt) {
+      $updateStudentsStmt->bind_param('sss', $classification, $studentId, $classification);
+      $updateStudentsStmt->execute();
+      $updateStudentsStmt->close();
+    }
+  }
 }
 
 function isGradePassingForPromotion($gradeValue): bool {
@@ -872,24 +908,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $stmt->bind_param($insertTypes, ...$insertVals);
         
         if ($stmt->execute()) {
-            // Update student classification to irregular in signin_db and students_db
-            $updateSql = "UPDATE signin_db SET classification = 'irregular' WHERE student_id = ? AND (classification IS NULL OR classification != 'irregular')";
-            $updateStmt = $conn->prepare($updateSql);
-            if ($updateStmt) {
-                $updateStmt->bind_param('s', $student_id);
-                $updateStmt->execute();
-                $updateStmt->close();
-                
-                // Also update students_db if it exists and has a classification column
-                if (columnExists($conn, 'students_db', 'classification')) {
-                    $updateStudentsDb = $conn->prepare("UPDATE students_db SET classification = 'irregular' WHERE student_id = ?");
-                    if ($updateStudentsDb) {
-                        $updateStudentsDb->bind_param('s', $student_id);
-                        $updateStudentsDb->execute();
-                        $updateStudentsDb->close();
-                    }
-                }
-            }
+          syncStudentClassification($conn, $student_id, resolveStudentClassification($conn, $student_id));
             
             echo json_encode([
                 'success' => true,
@@ -1527,25 +1546,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
             
-            // Update student classification to irregular in signin_db and students_db
             if ($successCount > 0) {
-                $updateSql = "UPDATE signin_db SET classification = 'irregular' WHERE student_id = ? AND (classification IS NULL OR classification != 'irregular')";
-                $updateStmt = $conn->prepare($updateSql);
-                if ($updateStmt) {
-                    $updateStmt->bind_param('s', $student_id);
-                    $updateStmt->execute();
-                    $updateStmt->close();
-                    
-                    // Also update students_db if it exists and has a classification column
-                    if (columnExists($conn, 'students_db', 'classification')) {
-                        $updateStudentsDb = $conn->prepare("UPDATE students_db SET classification = 'irregular' WHERE student_id = ?");
-                        if ($updateStudentsDb) {
-                            $updateStudentsDb->bind_param('s', $student_id);
-                            $updateStudentsDb->execute();
-                            $updateStudentsDb->close();
-                        }
-                    }
-                }
+              syncStudentClassification($conn, $student_id, resolveStudentClassification($conn, $student_id));
                 
                 // Also update year_semester in irregular_db for all newly added subjects
                 $currentYear = $GLOBALS['currentYear'] ?? date('Y');
@@ -1608,28 +1610,11 @@ $fiscalYear = trim($_GET['fiscal_year'] ?? $_POST['fiscal_year'] ?? '');
 // Classification policy based on total failed units:
 // - >= 6.00 units: Probationary
 // - >= 6.25 units: Dismissal
+// If neither threshold is met, fall back to irregular vs regular.
 if ($studentId !== '') {
   try {
-    $failedUnits = calculateFailedUnitsForStudent($conn, $studentId);
-    $ruleClassification = classificationByFailedUnits($failedUnits);
-
-    if ($ruleClassification !== null) {
-      $updateSigninStmt = $conn->prepare("UPDATE signin_db SET classification = ? WHERE student_id = ? AND (classification IS NULL OR classification <> ?)");
-      if ($updateSigninStmt) {
-        $updateSigninStmt->bind_param('sss', $ruleClassification, $studentId, $ruleClassification);
-        $updateSigninStmt->execute();
-        $updateSigninStmt->close();
-      }
-
-      if (columnExists($conn, 'students_db', 'classification')) {
-        $updateStudentsStmt = $conn->prepare("UPDATE students_db SET classification = ? WHERE student_id = ? AND (classification IS NULL OR classification <> ?)");
-        if ($updateStudentsStmt) {
-          $updateStudentsStmt->bind_param('sss', $ruleClassification, $studentId, $ruleClassification);
-          $updateStudentsStmt->execute();
-          $updateStudentsStmt->close();
-        }
-      }
-    }
+    $resolvedClassification = resolveStudentClassification($conn, $studentId);
+    syncStudentClassification($conn, $studentId, $resolvedClassification);
   } catch (Throwable $e) {
     error_log('Failed-unit classification update failed in stueval.php: ' . $e->getMessage());
   }
@@ -3030,50 +3015,21 @@ try {
         <div class="small text-muted">Classification</div>
         <div class="fw-bold">
           <?php 
-          $checkYear = $GLOBALS['currentYear'] ?? date('Y');
-          $checkSem = $GLOBALS['currentSem'] ?? 1;
-          $isIrregular = checkIrregularStatus($conn, $studentId, $checkYear, $checkSem);
-          $classification = $isIrregular ? 'Irregular' : 'Regular';
-          $badgeClass = $isIrregular ? 'badge bg-warning text-dark' : 'badge bg-primary text-white';
-          
-          // Update signin_db and students_db classification based on student status
-          if ($isIrregular) {
-              $updateSql = "UPDATE signin_db SET classification = 'irregular' WHERE student_id = ? AND (classification IS NULL OR classification != 'irregular')";
-              $updateStmt = $conn->prepare($updateSql);
-              if ($updateStmt) {
-                  $updateStmt->bind_param('s', $studentId);
-                  $updateStmt->execute();
-                  $updateStmt->close();
-                  
-                  // Also update students_db if it exists and has a classification column
-                  if (columnExists($conn, 'students_db', 'classification')) {
-                      $updateStudentsDb = $conn->prepare("UPDATE students_db SET classification = 'irregular' WHERE student_id = ?");
-                      if ($updateStudentsDb) {
-                          $updateStudentsDb->bind_param('s', $studentId);
-                          $updateStudentsDb->execute();
-                          $updateStudentsDb->close();
-                      }
-                  }
-              }
-          } else {
-              // Update to Regular if student is not irregular
-              $updateSql = "UPDATE signin_db SET classification = 'Regular' WHERE student_id = ? AND (classification IS NULL OR classification != 'Regular')";
-              $updateStmt = $conn->prepare($updateSql);
-              if ($updateStmt) {
-                  $updateStmt->bind_param('s', $studentId);
-                  $updateStmt->execute();
-                  $updateStmt->close();
-                  
-                  // Also update students_db if it exists and has a classification column
-                  if (columnExists($conn, 'students_db', 'classification')) {
-                      $updateStudentsDb = $conn->prepare("UPDATE students_db SET classification = 'Regular' WHERE student_id = ?");
-                      if ($updateStudentsDb) {
-                          $updateStudentsDb->bind_param('s', $studentId);
-                          $updateStudentsDb->execute();
-                          $updateStudentsDb->close();
-                      }
-                  }
-              }
+          $classification = resolveStudentClassification($conn, $studentId);
+          syncStudentClassification($conn, $studentId, $classification);
+          switch ($classification) {
+            case 'Dismissal':
+              $badgeClass = 'badge bg-danger text-white';
+              break;
+            case 'Probationary':
+              $badgeClass = 'badge bg-warning text-dark';
+              break;
+            case 'Irregular':
+              $badgeClass = 'badge bg-secondary text-white';
+              break;
+            default:
+              $badgeClass = 'badge bg-primary text-white';
+              break;
           }
           ?>
           <span class="<?= $badgeClass ?>"><?= $classification ?></span>

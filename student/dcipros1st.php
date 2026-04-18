@@ -124,12 +124,23 @@ if ($isIrregular) {
         }
     }
 }
-$stmt = $conn->prepare("SELECT firstname, lastname, student_id, course, classification, profile_image FROM signin_db WHERE student_id = ?");
+$stmt = $conn->prepare("SELECT firstname, lastname, student_id, course, classification, profile_image, role_id, department_id, esignature FROM signin_db WHERE student_id = ?");
 $stmt->bind_param("s", $student_id);
 $stmt->execute();
 $result = $stmt->get_result();
 $student = $result->fetch_assoc();
 $stmt->close();
+
+$directorSignature = '';
+$directorStmt = $conn->prepare("SELECT esignature FROM signin_db WHERE role_id = 2 AND department_id = 1 AND esignature IS NOT NULL AND esignature <> '' ORDER BY id ASC LIMIT 1");
+if ($directorStmt) {
+    $directorStmt->execute();
+    $directorResult = $directorStmt->get_result();
+    if ($directorResult && ($directorRow = $directorResult->fetch_assoc())) {
+        $directorSignature = trim((string)($directorRow['esignature'] ?? ''));
+    }
+    $directorStmt->close();
+}
 
 // Initialize total units
 $totalUnits = 0;
@@ -1805,11 +1816,21 @@ if (!empty($student_id)) {
 
 // Only show signature if student has irregular courses
 if ($hasIrregularCourses) {
+    $signatureSrc = 'signature.png';
+    if (!empty($directorSignature)) {
+        $normalizedSignature = str_replace('\\', '/', trim($directorSignature));
+        if (preg_match('#^uploads/esignatures/#i', $normalizedSignature)) {
+            $signatureSrc = '../adminpage/' . $normalizedSignature;
+        } else {
+            $signatureSrc = '../adminpage/uploads/esignatures/' . ltrim($normalizedSignature, '/');
+        }
+    }
+
     echo '<div class="program-director-section" style="margin-top:5px;text-align:center;page-break-inside:avoid;">';
     echo '<div style="margin-top:2px;">';
     echo '</div>';
     echo '<div style="text-align: center; margin: 20px 0;">';
-    echo '<img src="signature.png" alt="Signature" style="max-width: 200px; height: auto; display: block; margin: 0 auto;">';
+    echo '<img src="' . htmlspecialchars($signatureSrc) . '" alt="Signature" style="max-width: 200px; height: auto; display: block; margin: 0 auto;">';
     echo '______________________________________';
     echo '</div>';
     echo '<div style="margin-top:2px;font-size:9px;">PROGRAM DIRECTOR</div>';
