@@ -1,11 +1,41 @@
 <?php
+if (function_exists('session_status') && session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
 include 'db.php';
+
+if (function_exists('mysqli_report')) {
+    mysqli_report(MYSQLI_REPORT_OFF);
+}
 
 // Flags/messages for SweetAlert feedback
 $uploadSuccess = false;
 $uploadMessage = '';
 $registerSuccess = false;
 $registerMessage = '';
+
+function showSweetAlertAndBack($icon, $title, $message) {
+    $_SESSION['flash_swal'] = [
+        'icon' => $icon,
+        'title' => $title,
+        'text' => $message,
+        'redirect' => 'addsturegs.php'
+    ];
+    header('Location: addsturegs.php');
+    exit();
+}
+
+function redirectWithSweetAlert($icon, $title, $message, $redirect) {
+    $_SESSION['flash_swal'] = [
+        'icon' => $icon,
+        'title' => $title,
+        'text' => $message,
+        'redirect' => $redirect
+    ];
+    header('Location: ' . $redirect);
+    exit();
+}
 
 // Function to format student ID as YYYY-NNNNN
 function formatStudentId($id) {
@@ -77,6 +107,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['csv_file'])) {
 
     $success = 0;
     $fail = 0;
+    $duplicate = 0;
 
     $conn->begin_transaction();
 
@@ -134,24 +165,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['csv_file'])) {
         $check_stmt->store_result();
 
         if ($check_stmt->num_rows > 0) {
-            // Update existing record (do not touch email; table has no category column)
-            $stmt = $conn->prepare("UPDATE students_db SET student_name = ?, curriculum = ?, classification = ?, programs = ?, academic_year = ?, semester = ?, status = ?, gender = ?, fiscal_year = ? WHERE student_id = ?");
-            if (!$stmt) {
-                $check_stmt->close();
-                $fail++;
-                continue;
-            }
-            $stmt->bind_param("ssssssssss", $student_name, $curriculum, $classification, $programs, $academic_year, $semester, $status, $gender, $fiscal_year, $student_id);
-        } else {
-            // Insert new record (email left NULL/default)
-            $stmt = $conn->prepare("INSERT INTO students_db (student_id, student_name, curriculum, classification, programs, academic_year, semester, status, gender, fiscal_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            if (!$stmt) {
-                $check_stmt->close();
-                $fail++;
-                continue;
-            }
-            $stmt->bind_param("ssssssssss", $student_id, $student_name, $curriculum, $classification, $programs, $academic_year, $semester, $status, $gender, $fiscal_year);
+            $duplicate++;
+            $check_stmt->close();
+            continue;
         }
+
+        // Insert new record (email left NULL/default)
+        $stmt = $conn->prepare("INSERT INTO students_db (student_id, student_name, curriculum, classification, programs, academic_year, semester, status, gender, fiscal_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        if (!$stmt) {
+            $check_stmt->close();
+            $fail++;
+            continue;
+        }
+        $stmt->bind_param("ssssssssss", $student_id, $student_name, $curriculum, $classification, $programs, $academic_year, $semester, $status, $gender, $fiscal_year);
 
         $check_stmt->close();
 
@@ -168,16 +194,29 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['csv_file'])) {
 
     // Record success message for SweetAlert in the HTML section
     $uploadSuccess = true;
-    $uploadMessage = "$success students processed, $fail failed.";
+    $duplicateMessage = $duplicate === 1 ? '1 student was already in the list' : "$duplicate students were already in the list";
+    $uploadMessage = "$success students processed, $duplicateMessage, $fail failed.";
+
+    redirectWithSweetAlert('success', 'Student added successfully', $uploadMessage, 'addsturegs.php');
+
+    $_SESSION['flash_swal'] = [
+        'icon' => 'success',
+        'title' => 'Upload complete',
+        'text' => $uploadMessage,
+        'redirect' => 'registrar.php'
+    ];
+    header('Location: registrar.php');
+    exit();
 }
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
+    try {
     $student_id = formatStudentId(trim($_POST['student_id']));
     $student_name = trim($_POST['student_name']);
     
-    // Validate student name (only letters and spaces allowed)
-    if (!preg_match("/^[a-zA-Z\s]+$/", $student_name)) {
-        echo "<script>alert('Student name can only contain letters and spaces.'); window.history.back();</script>";
+    // Validate student name using a permissive format for real-world names
+    if (!preg_match("/^[a-zA-Z\s.'-]+$/", $student_name)) {
+        echo "<script>alert('Student name can only contain letters, spaces, apostrophes, periods, and hyphens.'); window.history.back();</script>";
         exit();
     }
     
@@ -223,27 +262,27 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
     $check_stmt->store_result();
 
     if ($check_stmt->num_rows > 0) {
-        echo "<script>alert('A student with this ID already exists.'); window.history.back();</script>";
-        exit();
+        showSweetAlertAndBack('warning', 'Student already in the list', 'This student is already in the list.');
     }
     $check_stmt->close();
 
-    // Check if student name already exists (allow only one record per name)
-    $check_name_stmt = $conn->prepare("SELECT student_id FROM students_db WHERE student_name = ?");
-    if (!$check_name_stmt) {
-        error_log('addsturegs.php: Prepare failed for student_name check: ' . $conn->error);
-        echo "<script>alert('Server error while checking student name. Please contact the administrator.'); window.history.back();</script>";
-        exit();
-    }
-    $check_name_stmt->bind_param("s", $student_name);
-    $check_name_stmt->execute();
-    $check_name_stmt->store_result();
+    if (!empty($email)) {
+        $check_email_stmt = $conn->prepare("SELECT student_id FROM students_db WHERE email = ? LIMIT 1");
+        if (!$check_email_stmt) {
+            error_log('addsturegs.php: Prepare failed for email check: ' . $conn->error);
+            echo "<script>alert('Server error while checking email. Please contact the administrator.'); window.history.back();</script>";
+            exit();
+        }
+        $check_email_stmt->bind_param("s", $email);
+        $check_email_stmt->execute();
+        $check_email_stmt->store_result();
 
-    if ($check_name_stmt->num_rows > 0) {
-        echo "<script>alert('A student with this name already exists.'); window.history.back();</script>";
-        exit();
+        if ($check_email_stmt->num_rows > 0) {
+            $check_email_stmt->close();
+            showSweetAlertAndBack('warning', 'Email already in the list', 'This email is already registered to another student.');
+        }
+        $check_email_stmt->close();
     }
-    $check_name_stmt->close();
 
     // Insert into students_db
     $stmt = $conn->prepare("INSERT INTO students_db (student_id, student_name, email, curriculum, classification, programs, academic_year, semester, status, gender, fiscal_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
@@ -254,85 +293,105 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
     }
     $stmt->bind_param("sssssssssss", $student_id, $student_name, $email, $curriculum, $classification, $programs, $academic_year, $semester, $status, $gender, $fiscal_year);
 
-    if ($stmt->execute()) {
-        // After successful student registration, try to auto-insert into assign_curriculum
-        // 1) Parse curriculum label like "BSIT (2022-2023)" into program and fiscal_year
-        $programForAssign = null;
-        $fiscalForAssign = null;
-        if (preg_match('/^(.*?)\s*\(([^)]+)\)$/', $curriculum, $matches)) {
-            $programForAssign = trim($matches[1]);
-            $fiscalForAssign = trim($matches[2]);
+    try {
+        $stmt->execute();
+    } catch (mysqli_sql_exception $e) {
+        $duplicateError = strtolower($e->getMessage());
+        if (strpos($duplicateError, 'email') !== false) {
+            showSweetAlertAndBack('warning', 'Email already in the list', 'This email is already registered to another student.');
         }
 
-        if ($programForAssign && $fiscalForAssign) {
-            // 2) Find matching curriculum record to get curriculum_id
-            $curStmt = $conn->prepare("SELECT id, program, fiscal_year FROM curriculum WHERE program = ? AND fiscal_year = ? LIMIT 1");
-            $curStmt->bind_param("ss", $programForAssign, $fiscalForAssign);
-            if ($curStmt->execute()) {
-                $curResult = $curStmt->get_result();
-                if ($curRow = $curResult->fetch_assoc()) {
-                    $curriculumId = (int)$curRow['id'];
+        if (strpos($duplicateError, 'student_id') !== false || strpos($duplicateError, 'student id') !== false) {
+            showSweetAlertAndBack('warning', 'Student already in the list', 'This student is already in the list.');
+        }
 
-                    // 3) Find corresponding signin_db record for this student_id
-                    $signStmt = $conn->prepare("SELECT id FROM signin_db WHERE student_id = ? LIMIT 1");
-                    $signStmt->bind_param("s", $student_id);
-                    if ($signStmt->execute()) {
-                        $signResult = $signStmt->get_result();
-                        if ($signRow = $signResult->fetch_assoc()) {
-                            $signinId = (int)$signRow['id'];
+        error_log('addsturegs.php: Student insert failed: ' . $e->getMessage());
+        showSweetAlertAndBack('error', 'Registration failed', 'Error registering student.');
+    }
 
-                            // 4) Check if assignment already exists
-                            $checkAssign = $conn->prepare("SELECT 1 FROM assign_curriculum WHERE program_id = ? AND curriculum_id = ? LIMIT 1");
-                            $checkAssign->bind_param("ii", $signinId, $curriculumId);
-                            if ($checkAssign->execute()) {
-                                $checkAssign->store_result();
-                                if ($checkAssign->num_rows === 0) {
-                                    // 5) Insert new assignment
-                                    $insertAssign = $conn->prepare("INSERT INTO assign_curriculum (program_id, curriculum_id, program, fiscal_year) VALUES (?, ?, ?, ?)");
-                                    $insertAssign->bind_param("iiss", $signinId, $curriculumId, $programForAssign, $fiscalForAssign);
-                                    $insertAssign->execute();
-                                    $insertAssign->close();
-                                }
+    // After successful student registration, try to auto-insert into assign_curriculum
+    // 1) Parse curriculum label like "BSIT (2022-2023)" into program and fiscal_year
+    $programForAssign = null;
+    $fiscalForAssign = null;
+    if (preg_match('/^(.*?)\s*\(([^)]+)\)$/', $curriculum, $matches)) {
+        $programForAssign = trim($matches[1]);
+        $fiscalForAssign = trim($matches[2]);
+    }
+
+    if ($programForAssign && $fiscalForAssign) {
+        // 2) Find matching curriculum record to get curriculum_id
+        $curStmt = $conn->prepare("SELECT id, program, fiscal_year FROM curriculum WHERE program = ? AND fiscal_year = ? LIMIT 1");
+        $curStmt->bind_param("ss", $programForAssign, $fiscalForAssign);
+        if ($curStmt->execute()) {
+            $curResult = $curStmt->get_result();
+            if ($curRow = $curResult->fetch_assoc()) {
+                $curriculumId = (int)$curRow['id'];
+
+                // 3) Find corresponding signin_db record for this student_id
+                $signStmt = $conn->prepare("SELECT id FROM signin_db WHERE student_id = ? LIMIT 1");
+                $signStmt->bind_param("s", $student_id);
+                if ($signStmt->execute()) {
+                    $signResult = $signStmt->get_result();
+                    if ($signRow = $signResult->fetch_assoc()) {
+                        $signinId = (int)$signRow['id'];
+
+                        // 4) Check if assignment already exists
+                        $checkAssign = $conn->prepare("SELECT 1 FROM assign_curriculum WHERE program_id = ? AND curriculum_id = ? LIMIT 1");
+                        $checkAssign->bind_param("ii", $signinId, $curriculumId);
+                        if ($checkAssign->execute()) {
+                            $checkAssign->store_result();
+                            if ($checkAssign->num_rows === 0) {
+                                // 5) Insert new assignment
+                                $insertAssign = $conn->prepare("INSERT INTO assign_curriculum (program_id, curriculum_id, program, fiscal_year) VALUES (?, ?, ?, ?)");
+                                $insertAssign->bind_param("iiss", $signinId, $curriculumId, $programForAssign, $fiscalForAssign);
+                                $insertAssign->execute();
+                                $insertAssign->close();
                             }
-                            $checkAssign->close();
                         }
+                        $checkAssign->close();
                     }
-                    $signStmt->close();
                 }
+                $signStmt->close();
             }
-            $curStmt->close();
         }
-
-        // Record success message for SweetAlert in the HTML section
-        $registerSuccess = true;
-        $registerMessage = 'Student registered successfully!';
-    } else {
-        // Extra safety: if a UNIQUE index exists on student_id,
-        // catch database duplicate-key errors and show a clear message.
-        if ($stmt->errno === 1062 || (isset($stmt->error) && stripos($stmt->error, 'duplicate') !== false)) {
-            echo "<script>alert('A student with this ID already exists.'); window.history.back();</script>";
-        } else {
-            echo "<script>alert('Error registering student.'); window.history.back();</script>";
-        }
+        $curStmt->close();
     }
     $stmt->close();
+    redirectWithSweetAlert('success', 'Student added successfully', 'Student added successfully!', 'addsturegs.php');
+    } catch (Throwable $e) {
+        $errorText = strtolower($e->getMessage());
+        if (strpos($errorText, 'email') !== false) {
+            showSweetAlertAndBack('warning', 'Email already in the list', 'This email is already registered to another student.');
+        }
+
+        if (strpos($errorText, 'student_id') !== false || strpos($errorText, 'student id') !== false) {
+            showSweetAlertAndBack('warning', 'Student already in the list', 'This student is already in the list.');
+        }
+
+        error_log('addsturegs.php: manual registration failed: ' . $e->getMessage());
+        showSweetAlertAndBack('error', 'Registration failed', 'Error registering student.');
+    }
 }
 
 // Fetch distinct curriculum options based on existing assignments (assign_curriculum table)
 $curriculumOptions = [];
 if ($conn && $conn->connect_errno === 0) {
-    // Use assign_curriculum so options reflect actually assigned curricula
-    $curriculumSql = "SELECT DISTINCT curriculum_id, program, fiscal_year
-                      FROM assign_curriculum
-                      WHERE fiscal_year IS NOT NULL AND fiscal_year != ''
-                        AND program IS NOT NULL AND program != ''
-                      ORDER BY program, fiscal_year DESC";
+    try {
+        // Use assign_curriculum so options reflect actually assigned curricula
+        $curriculumSql = "SELECT DISTINCT curriculum_id, program, fiscal_year
+                          FROM assign_curriculum
+                          WHERE fiscal_year IS NOT NULL AND fiscal_year != ''
+                            AND program IS NOT NULL AND program != ''
+                          ORDER BY program, fiscal_year DESC";
 
-    if ($curriculumResult = $conn->query($curriculumSql)) {
-        while ($row = $curriculumResult->fetch_assoc()) {
-            $curriculumOptions[] = $row;
+        if ($curriculumResult = $conn->query($curriculumSql)) {
+            while ($row = $curriculumResult->fetch_assoc()) {
+                $curriculumOptions[] = $row;
+            }
+            $curriculumResult->free();
         }
-        $curriculumResult->free();
+    } catch (Throwable $e) {
+        error_log('addsturegs.php: curriculum options query failed: ' . $e->getMessage());
     }
 }
 ?>
@@ -343,7 +402,6 @@ if ($conn && $conn->connect_errno === 0) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Add Student</title> <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
         body { font-family: Arial, sans-serif; background: #f9f9f9; }
         .container { max-width: 500px; margin: 40px auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.07); }
@@ -441,27 +499,36 @@ if ($conn && $conn->connect_errno === 0) {
                 <select class="form-control" id="fiscal_year" name="fiscal_year" required>
                     <option value="">Select Fiscal Year</option>
                     <?php
-                    // Test fiscal years table
-                    $test_query = "SELECT COUNT(*) as count FROM fiscal_years";
-                    $test_result = $conn->query($test_query);
-                    $count = $test_result->fetch_assoc()['count'];
-                    
-                    echo "<!-- Fiscal years count: $count -->";
-                    
-                    if ($count > 0) {
-                        // Simple fiscal year query
-                        $fiscal_query = "SELECT label FROM fiscal_years ORDER BY start_date DESC, id DESC";
-                        $fiscal_result = $conn->query($fiscal_query);
-                        
-                        if ($fiscal_result) {
-                            while ($row = $fiscal_result->fetch_assoc()) {
-                                $fy = $row['label'];
-                                $selected = (isset($_POST['fiscal_year']) && $_POST['fiscal_year'] == $fy) ? 'selected' : '';
-                                echo "<option value=\"$fy\" $selected>$fy</option>";
+                    try {
+                        // Test fiscal years table
+                        $count = 0;
+                        $test_query = "SELECT COUNT(*) as count FROM fiscal_years";
+                        $test_result = $conn->query($test_query);
+                        if ($test_result && ($countRow = $test_result->fetch_assoc())) {
+                            $count = (int)($countRow['count'] ?? 0);
+                        }
+                        if ($test_result instanceof mysqli_result) {
+                            $test_result->free();
+                        }
+
+                        echo "<!-- Fiscal years count: $count -->";
+
+                        if ($count > 0) {
+                            // Simple fiscal year query
+                            $fiscal_query = "SELECT label FROM fiscal_years ORDER BY start_date DESC, id DESC";
+                            $fiscal_result = $conn->query($fiscal_query);
+
+                            if ($fiscal_result) {
+                                while ($row = $fiscal_result->fetch_assoc()) {
+                                    $fy = $row['label'];
+                                    $selected = (isset($_POST['fiscal_year']) && $_POST['fiscal_year'] == $fy) ? 'selected' : '';
+                                    echo "<option value=\"$fy\" $selected>$fy</option>";
+                                }
                             }
                         }
-                    } else {
-                        echo "<!-- No fiscal years found in table -->";
+                    } catch (Throwable $e) {
+                        error_log('addsturegs.php: fiscal year query failed: ' . $e->getMessage());
+                        echo "<!-- Fiscal years unavailable -->";
                     }
                     ?>
                 </select>
@@ -487,6 +554,36 @@ if ($conn && $conn->connect_errno === 0) {
         <a href="registrar.php" class="d-block text-center mt-4">Back to Student List</a>
     </div>
     <script>
+        function fireSweetAlert(options, redirectUrl) {
+            const runPopup = function () {
+                if (window.Swal && typeof Swal.fire === 'function') {
+                    Swal.fire(options).then(function () {
+                        if (redirectUrl) {
+                            window.location.href = redirectUrl;
+                        }
+                    });
+                    return;
+                }
+
+                const message = (options.title ? options.title + '\n' : '') + (options.text || '');
+                alert(message);
+                if (redirectUrl) {
+                    window.location.href = redirectUrl;
+                }
+            };
+
+            if (window.Swal && typeof Swal.fire === 'function') {
+                runPopup();
+                return;
+            }
+
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/sweetalert2@11';
+            script.onload = runPopup;
+            script.onerror = runPopup;
+            document.head.appendChild(script);
+        }
+
         // Student ID handling
         const studentIdInput = document.getElementById('student_id');
         const submitBtn = document.getElementById('submitBtn');
@@ -566,7 +663,11 @@ if ($conn && $conn->connect_errno === 0) {
             // Block submission if duplicate detected
             if (submitBtn.disabled) {
                 e.preventDefault();
-                alert('Duplicate Student ID detected. Please use a unique ID.');
+                fireSweetAlert({
+                    icon: 'warning',
+                    title: 'Student already in the list',
+                    text: 'This student is already in the list.'
+                });
                 document.getElementById('student_id').focus();
             }
         });
@@ -574,21 +675,21 @@ if ($conn && $conn->connect_errno === 0) {
 
 <?php
 // Trigger SweetAlert if there was a successful CSV upload or manual registration
-if ($uploadSuccess || $registerSuccess):
-    $msg = $uploadSuccess ? $uploadMessage : $registerMessage;
-    $title = $uploadSuccess ? 'Upload complete' : 'Student registered';
-    $msgJs = json_encode($msg, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-    $titleJs = json_encode($title, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+if (isset($_SESSION['flash_swal'])):
+    $flashSwal = $_SESSION['flash_swal'];
+    unset($_SESSION['flash_swal']);
+    $flashIcon = json_encode($flashSwal['icon'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $flashTitle = json_encode($flashSwal['title'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $flashText = json_encode($flashSwal['text'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $flashRedirect = json_encode($flashSwal['redirect'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 ?>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            Swal.fire({
-                icon: 'success',
-                title: <?php echo $titleJs; ?>,
-                text: <?php echo $msgJs; ?>
-            }).then(function () {
-                window.location.href = 'registrar.php';
-            });
+            fireSweetAlert({
+                icon: <?php echo $flashIcon; ?>,
+                title: <?php echo $flashTitle; ?>,
+                text: <?php echo $flashText; ?>
+            }, <?php echo $flashRedirect; ?>);
         });
     </script>
 <?php endif; ?>

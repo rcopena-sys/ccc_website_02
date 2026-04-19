@@ -2963,7 +2963,7 @@ try {
             </option>
           <?php endforeach; ?>
         </select>
-        <div class="form-text">Select a curriculum to view. This does not change the student's enrolled course.</div>
+        <div class="form-text"></div>
       </div>
       <?php if (columnExists($conn, 'curriculum', 'fiscal_year')): ?>
       <div class="col-sm-3">
