@@ -328,6 +328,7 @@ $conn->close();
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Dean Dashboard</title> <link rel="icon" type="image/x-icon" href="favicon.ico">
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="../dashboard-theme.css">
   <style>
     #clock {
       font-family: 'Arial', sans-serif;
@@ -469,124 +470,123 @@ $conn->close();
   </aside>
 
   <!-- Main Content -->
-  <main class="flex-1 p-10 relative" style="background-image: url('cccd.jpg'); background-size: cover; background-position: center; background-attachment: fixed; background-repeat: no-repeat;">
-  <div class="absolute top-4 right-48 flex items-center space-x-4">
-    <div class="flex items-center space-x-4">
-      <a href="notification_page.php" class="bg-white bg-opacity-70 p-2 rounded-full shadow hover:bg-opacity-100 transition-all duration-200 relative">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-        </svg>
-      </a>
-      <div id="clock" class="bg-white bg-opacity-70 px-4 py-2 rounded shadow"></div>
-    </div>
-  </div>
-  </div>
-
-  <div class="bg-white bg-opacity-90 rounded-lg p-6 shadow-md">
-    <div class="flex justify-center mb-6">
-      <img src="te.png" alt="DCI Logo" class="h-32 w-auto">
-    </div>
-    <h1 class="text-3xl font-bold text-center text-blue-700 mb-8">Department Of Teacher Education</h1>
-
-    <!-- Dashboard Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mt-10">
-      <div class="bg-white text-blue-700 border-2 border-blue-600 p-6 rounded-lg shadow-lg">
-        <div class="text-xl font-semibold">Total Students</div>
-        <div class="text-3xl font-bold mt-2"><?php echo $total_students; ?></div>
-      </div>
-      <div class="bg-white text-blue-700 border-2 border-blue-600 p-6 rounded-lg shadow-lg">
-        <div class="text-xl font-semibold">Curriculum</div>
-        <div class="text-3xl font-bold mt-2"><?php echo $curriculum_count; ?></div>
-      </div>
-      <a href="list.php?program=BSIT" class="bg-white text-blue-700 border-2 border-blue-600 p-6 rounded-lg shadow-lg block hover:bg-blue-50 transition">
-        <div class="text-xl font-semibold">Bachelor Of Elementary Education</div>
-        <div class="text-3xl font-bold mt-2">
-          <?php echo $bsit_count ?? 0; ?>
-        </div>
-      </a>
-      <a href="list.php?program=BSCS" class="bg-white text-blue-700 border-2 border-blue-600 p-6 rounded-lg shadow-lg block hover:bg-blue-50 transition">
-        <div class="text-xl font-semibold">Bachelor Of Secondary Education Major In English</div>
-        <div class="text-3xl font-bold mt-2">
-          <?php echo $bscs_count ?? 0; ?>
-        </div>
-      </a>
-      <a href="regularstu.php" class="bg-white text-blue-700 border-2 border-blue-600 p-6 rounded-lg shadow-lg block hover:bg-blue-50 transition">
-        <div class="text-xl font-semibold">Bachelor Of Secondary Education Major In Mathematics</div>
-        <div class="text-3xl font-bold mt-2">
-          <?php echo number_format($regular_count ?? 0); ?>
-        </div>
-      </a>
-      <a href="irregularstu.php" class="bg-white text-blue-700 border-2 border-blue-600 p-6 rounded-lg shadow-lg block hover:bg-blue-50 transition">
-        <div class="text-xl font-semibold">Bachelor Of Secondary Education Major In Science</div>
-        <div class="text-3xl font-bold mt-2">
-          <?php echo number_format($irregular_count ?? 0); ?>
-        </div>
-      </a>
-    </div>
-
-    <!-- Additional Statistics Section -->
-    <div class="bg-white bg-opacity-90 rounded-lg p-6 shadow-md mt-10" style="position: relative; z-index: 10;">
-      <h2 class="text-2xl font-bold text-blue-700 mb-6">Statistics Overview</h2>
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <div class="bg-blue-50 p-4 rounded shadow">
-          <div class="text-lg font-semibold text-blue-800">Curriculum in Operation</div>
-          <div class="text-2xl font-bold mt-2"><?php echo $curriculum_count; ?></div>
-        </div>
-        <div class="bg-blue-50 p-4 rounded shadow">
-          <div class="text-lg font-semibold text-blue-800">Total Population</div>
-          <div class="text-2xl font-bold mt-2"><?php echo number_format($total_population); ?></div>
-        </div>
-         <a href="regularstu.php" class="block bg-blue-50 p-4 rounded shadow hover:bg-blue-100 transition duration-200 transform hover:scale-105">
-          <div class="text-lg font-semibold text-blue-800">Regular Students</div>
-          <div class="text-2xl font-bold mt-2">
-            <?php echo number_format($regular_count); ?>
-          </div>
-        </a>
-        <a href="irregularstu.php" class="block bg-blue-50 p-4 rounded shadow hover:bg-blue-100 transition duration-200 transform hover:scale-105">
-          <div class="text-lg font-semibold text-blue-800">Irregular Students</div>
-          <div class="text-2xl font-bold mt-2">
-            <?php echo number_format($irregular_count); ?>
-          </div>
-        </a>
-       
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+  <main class="dashboard-main flex-1">
+    <div class="dashboard-shell">
+      <section class="dashboard-topbar topbar">
         <div>
-         
-          
-              
-            </tbody>
-          </table>
+          <div class="dashboard-kicker">Dean Dashboard</div>
+          <h1>Department of Teacher Education</h1>
+          <p>Live academic snapshot for the teacher education programs.</p>
         </div>
-        <div>
-          <h3 class="text-lg font-semibold text-blue-800 mb-2">Gender Distribution</h3>
-          <canvas id="genderPieChart" width="300" height="300"></canvas>
+        <div class="topbar-actions">
+          <div class="pill-action">
+            <i class="fas fa-sync-alt"></i>
+            <span>Updated <?php echo date('M d, Y h:i A'); ?></span>
+          </div>
+          <a href="notification_page.php" class="pill-action relative">
+            <i class="fas fa-bell"></i>
+            <span>Notifications</span>
+            <?php if ($unread_count > 0): ?>
+              <strong class="ml-1 text-red-500"><?php echo $unread_count; ?></strong>
+            <?php endif; ?>
+          </a>
         </div>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-       
-            </thead>
-           
-          </table>
+      </section>
+
+      <section class="dashboard-stats">
+        <div class="metric-card">
+          <div class="metric-label">Total Students</div>
+          <div class="metric-value"><?php echo number_format($total_students); ?></div>
+          <div class="metric-note">Combined enrollment across programs.</div>
         </div>
-      </div>
-    </div>
-    <div class="bg-white bg-opacity-90 rounded-lg p-6 shadow-md mt-10 sticky top-0">
-      <h2 class="text-2xl font-bold text-blue-700 mb-6">Year Level Regular/Irregular Pie Charts</h2>
-      <div class="flex flex-wrap gap-8 justify-center">
-        <?php foreach ($year_levels as $level): ?>
-          <div class="bg-white p-4 rounded shadow" style="position: relative;">
-            <h3 class="font-semibold text-center mb-2"><?php echo $level; ?> Year</h3>
-            <div class="h-48" style="position: relative;">
-              <canvas id="pie_<?php echo $level; ?>"></canvas>
+        <div class="metric-card">
+          <div class="metric-label">Curriculum</div>
+          <div class="metric-value"><?php echo number_format($curriculum_count); ?></div>
+          <div class="metric-note">Curriculum entries in operation.</div>
+        </div>
+        <a href="list.php?program=BEED" class="metric-card link-card block no-underline text-inherit">
+          <div class="metric-label">BEED</div>
+          <div class="metric-value"><?php echo number_format($beed_count); ?></div>
+          <div class="metric-note">Bachelor of Elementary Education.</div>
+        </a>
+        <a href="list.php?program=BSEME" class="metric-card link-card block no-underline text-inherit">
+          <div class="metric-label">BSE English</div>
+          <div class="metric-value"><?php echo number_format($bse_english_count); ?></div>
+          <div class="metric-note">BSE major in English.</div>
+        </a>
+      </section>
+
+      <section class="dashboard-grid">
+        <div class="chart-card panel-card">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Program Enrollment</div>
+              <div class="panel-subtitle">Enrollment distribution across the four teacher education programs.</div>
+            </div>
+            <div class="panel-badge">Live</div>
+          </div>
+          <div class="chart-frame">
+            <canvas id="programChart"></canvas>
+          </div>
+        </div>
+
+        <div class="right-stack">
+          <div class="chart-card panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Classification Distribution</div>
+                <div class="panel-subtitle">Regular versus irregular students.</div>
+              </div>
+              <div class="panel-badge">Live</div>
+            </div>
+            <div class="chart-frame small">
+              <canvas id="statusChart"></canvas>
             </div>
           </div>
-        <?php endforeach; ?>
-      </div>
+
+          <div class="mini-grid">
+            <div class="mini-card">
+              <div class="panel-title" style="margin-bottom:6px;">Gender Distribution</div>
+              <div class="panel-subtitle" style="margin-bottom:12px;">Breakdown by gender.</div>
+              <div class="chart-frame small">
+                <canvas id="genderChart"></canvas>
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="panel-title" style="margin-bottom:12px;">Academic Summary</div>
+              <div class="summary-stack">
+                <div class="summary-chip"><strong>Total Population</strong><span><?php echo number_format($total_population); ?></span></div>
+                <div class="summary-chip"><strong>BSE Math</strong><span><?php echo number_format($bse_math_count); ?></span></div>
+                <div class="summary-chip"><strong>BSE Science</strong><span><?php echo number_format($bse_science_count); ?></span></div>
+                <div class="summary-chip"><strong>Scope</strong><span><?php echo $selected_fiscal_year ? htmlspecialchars($selected_fiscal_year) : 'All Years'; ?></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="chart-card panel-card">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Year Level Breakdown</div>
+            <div class="panel-subtitle">Regular and irregular counts for each year level.</div>
+          </div>
+          <div class="panel-badge">Overview</div>
+        </div>
+        <div class="flex flex-wrap gap-4 justify-center">
+          <?php foreach ($year_levels as $level): ?>
+            <div class="bg-white p-4 rounded shadow" style="position: relative; min-width: 240px; flex: 1 1 240px;">
+              <h3 class="font-semibold text-center mb-2"><?php echo $level; ?> Year</h3>
+              <div class="h-48" style="position: relative;">
+                <canvas id="pie_<?php echo $level; ?>"></canvas>
+              </div>
+            </div>
+          <?php endforeach; ?>
+        </div>
+      </section>
     </div>
-    <!-- End Additional Statistics Section -->
-  </div>
-</main>
+  </main>
 
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -651,142 +651,7 @@ $conn->close();
       handleResize();
       window.addEventListener('resize', handleResize);
 
-      // Initialize charts when the DOM is fully loaded
-      // Gender Distribution Chart
-      const genderCtx = document.getElementById('genderChart').getContext('2d');
-      new Chart(genderCtx, {
-        type: 'pie',
-        data: {
-          labels: [
-            'Male (<?php echo $gender_counts['Male']; ?>)', 
-            'Female (<?php echo $gender_counts['Female']; ?>)'
-          ],
-          datasets: [{
-            data: [
-              <?php echo $gender_counts['Male']; ?>, 
-              <?php echo $gender_counts['Female']; ?>
-            ],
-            backgroundColor: [
-              'rgba(37, 99, 235, 0.7)',
-              'rgba(59, 130, 246, 0.7)'
-            ],
-            borderColor: [
-              'rgba(37, 99, 235, 1)',
-              'rgba(59, 130, 246, 1)'
-            ],
-            borderWidth: 1
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'bottom'
-            },
-            tooltip: {
-              callbacks: {
-                label: function(context) {
-                  const label = context.label || '';
-                  const value = context.raw || 0;
-                  const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                  const percentage = Math.round((value / total) * 100);
-                  return `${label}: ${value} (${percentage}%)`;
-                }
-              }
-            }
-          }
-        }
-      });
-
-      // Program Enrollment Chart
-      const programCtx = document.getElementById('programChart').getContext('2d');
-      new Chart(programCtx, {
-        type: 'pie',
-        data: {
-          labels: [
-            'BSCS (<?php echo $bscs_count; ?>)', 
-            'BSIT (<?php echo $bsit_count; ?>)'
-          ],
-          datasets: [{
-            data: [
-              <?php echo $bscs_count; ?>, 
-              <?php echo $bsit_count; ?>
-            ],
-            backgroundColor: [
-              'rgba(37, 99, 235, 0.7)',
-              'rgba(96, 165, 250, 0.7)'
-            ],
-            borderColor: [
-              'rgba(37, 99, 235, 1)',
-              'rgba(96, 165, 250, 1)'
-            ],
-            borderWidth: 1
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'bottom'
-            },
-            tooltip: {
-              callbacks: {
-                label: function(context) {
-                  const label = context.label || '';
-                  const value = context.raw || 0;
-                  const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                  const percentage = Math.round((value / total) * 100);
-                  return `${label}: ${value} (${percentage}%)`;
-                }
-              }
-            }
-          }
-        }
-      });
-
-      // Student Status Chart
-      const statusCtx = document.getElementById('statusChart').getContext('2d');
-      new Chart(statusCtx, {
-        type: 'pie',
-        data: {
-          labels: [
-            'Regular (<?php echo $regular_count; ?>)', 
-            'Irregular (<?php echo $irregular_count; ?>)'
-          ],
-          datasets: [{
-            data: [
-              <?php echo $regular_count; ?>, 
-              <?php echo $irregular_count; ?>
-            ],
-            backgroundColor: [
-              'rgba(37, 99, 235, 0.7)',
-              'rgba(96, 165, 250, 0.7)'
-            ],
-            borderColor: ['rgba(37, 99, 235, 1)', 'rgba(96, 165, 250, 1)'],
-            borderWidth: 1
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { position: 'bottom' },
-            tooltip: {
-              callbacks: {
-                label: function(context) {
-                  const label = context.label || '';
-                  const value = context.raw || 0;
-                  const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                  const percentage = Math.round((value / total) * 100);
-                  return `${label}: ${value} (${percentage}%)`;
-                }
-              }
-            }
-          }
-        }
-      });
+      // Charts are initialized in the dedicated dashboard script below.
     });
 
     function updateClock() {
@@ -797,23 +662,29 @@ $conn->close();
         second: '2-digit',
         hour12: true 
       });
-      document.getElementById('clock').textContent = timeString;
+      const clockElement = document.getElementById('clock');
+      if (clockElement) {
+        clockElement.textContent = timeString;
+      }
     }
     
     // Update clock immediately and then every second
     updateClock();
-    setInterval(updateClock, 1000);
+    if (document.getElementById('clock')) {
+      setInterval(updateClock, 1000);
+    }
 
     // Student Dropdown
     const btn = document.getElementById('studentDropdownBtn');
     const menu = document.getElementById('studentDropdownMenu');
     const icon = document.getElementById('dropdownIcon');
-    
-    btn.addEventListener('click', function(e) {
-      e.preventDefault();
-      menu.classList.toggle('hidden');
-      icon.classList.toggle('rotate-180');
-    });
+    if (btn && menu && icon) {
+      btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        menu.classList.toggle('hidden');
+        icon.classList.toggle('rotate-180');
+      });
+    }
 
     // Evaluation Dropdown
     const evalBtn = document.getElementById('evaluationDropdownBtn');
@@ -824,7 +695,7 @@ $conn->close();
     const curriculumMenu = document.getElementById('curriculumDropdownMenu');
     const curriculumIcon = document.getElementById('curriculumDropdownIcon');
 
-    if (curriculumBtn) {
+    if (curriculumBtn && curriculumMenu && curriculumIcon) {
       curriculumBtn.addEventListener('click', function(e) {
         e.preventDefault();
         curriculumMenu.classList.toggle('hidden');
@@ -837,30 +708,34 @@ $conn->close();
     const fiscalYearMenu = document.getElementById('fiscalYearDropdownMenu');
     const fiscalYearIcon = document.getElementById('fiscalYearDropdownIcon');
 
-    fiscalYearBtn.addEventListener('click', function(e) {
-      e.preventDefault();
-      fiscalYearMenu.classList.toggle('hidden');
-      fiscalYearIcon.classList.toggle('rotate-180');
-    });
+    if (fiscalYearBtn && fiscalYearMenu && fiscalYearIcon) {
+      fiscalYearBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        fiscalYearMenu.classList.toggle('hidden');
+        fiscalYearIcon.classList.toggle('rotate-180');
+      });
+    }
     const evalIcon = document.getElementById('evaluationDropdownIcon');
     
-    evalBtn.addEventListener('click', function(e) {
-      e.preventDefault();
-      evalMenu.classList.toggle('hidden');
-      evalIcon.classList.toggle('rotate-180');
-    });
+    if (evalBtn && evalMenu && evalIcon) {
+      evalBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        evalMenu.classList.toggle('hidden');
+        evalIcon.classList.toggle('rotate-180');
+      });
+    }
 
     // Close dropdowns when clicking outside
     document.addEventListener('click', function(event) {
-      if (!btn.contains(event.target) && !menu.contains(event.target)) {
+      if (btn && menu && !btn.contains(event.target) && !menu.contains(event.target)) {
         menu.classList.add('hidden');
         icon.classList.remove('rotate-180');
       }
-      if (!evalBtn.contains(event.target) && !evalMenu.contains(event.target)) {
+      if (evalBtn && evalMenu && !evalBtn.contains(event.target) && !evalMenu.contains(event.target)) {
         evalMenu.classList.add('hidden');
         evalIcon.classList.remove('rotate-180');
       }
-      if (curriculumBtn && !curriculumBtn.contains(event.target) && !curriculumMenu.contains(event.target)) {
+      if (curriculumBtn && curriculumMenu && curriculumIcon && !curriculumBtn.contains(event.target) && !curriculumMenu.contains(event.target)) {
         curriculumMenu.classList.add('hidden');
         curriculumIcon.classList.remove('rotate-180');
       }
@@ -878,25 +753,84 @@ $conn->close();
   <!-- Chart.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
-    // Gender Pie Chart
-    const ctx = document.getElementById('genderPieChart').getContext('2d');
-    const genderPieChart = new Chart(ctx, {
-      type: 'pie',
-      data: {
-        labels: ['Male', 'Female'],
-        datasets: [{
-          data: [<?php echo $gender_counts['Male']; ?>, <?php echo $gender_counts['Female']; ?>],
-          backgroundColor: ['#2563eb', '#3b82f6'],
-        }]
-      },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: {
-            position: 'bottom',
+    document.addEventListener('DOMContentLoaded', function() {
+      const programCanvas = document.getElementById('programChart');
+      if (programCanvas) {
+        new Chart(programCanvas.getContext('2d'), {
+          type: 'pie',
+          data: {
+            labels: [
+              'BEED (<?php echo $beed_count; ?>)',
+              'BSE English (<?php echo $bse_english_count; ?>)',
+              'BSE Math (<?php echo $bse_math_count; ?>)',
+              'BSE Science (<?php echo $bse_science_count; ?>)'
+            ],
+            datasets: [{
+              data: [
+                <?php echo $beed_count; ?>,
+                <?php echo $bse_english_count; ?>,
+                <?php echo $bse_math_count; ?>,
+                <?php echo $bse_science_count; ?>
+              ],
+              backgroundColor: ['#2563eb', '#3b82f6', '#60a5fa', '#93c5fd'],
+              borderWidth: 1
+            }]
           },
-        },
-      },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'bottom' }
+            }
+          }
+        });
+      }
+
+      const statusCanvas = document.getElementById('statusChart');
+      if (statusCanvas) {
+        new Chart(statusCanvas.getContext('2d'), {
+          type: 'pie',
+          data: {
+            labels: [
+              'Regular (<?php echo $regular_count; ?>)',
+              'Irregular (<?php echo $irregular_count; ?>)'
+            ],
+            datasets: [{
+              data: [<?php echo $regular_count; ?>, <?php echo $irregular_count; ?>],
+              backgroundColor: ['#2563eb', '#f59e0b'],
+              borderWidth: 1
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'bottom' }
+            }
+          }
+        });
+      }
+
+      const genderCanvas = document.getElementById('genderChart');
+      if (genderCanvas) {
+        new Chart(genderCanvas.getContext('2d'), {
+          type: 'pie',
+          data: {
+            labels: ['Male', 'Female'],
+            datasets: [{
+              data: [<?php echo $gender_counts['Male']; ?>, <?php echo $gender_counts['Female']; ?>],
+              backgroundColor: ['#2563eb', '#3b82f6'],
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'bottom' }
+            }
+          }
+        });
+      }
     });
 
     // Initialize year level charts

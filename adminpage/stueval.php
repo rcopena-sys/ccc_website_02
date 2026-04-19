@@ -32,6 +32,11 @@ function isRegularStudent($studentData) {
     return preg_match('/\birregular\b/i', trim($classification)) === 1;
   }
 
+  function canOverloadSubjects(string $classification): bool {
+    $classification = trim($classification);
+    return isIrregularClassification($classification) || preg_match('/\bprobationary\b/i', $classification) === 1;
+  }
+
 // Check if a student should be classified as irregular
 function checkIrregularStatus($conn, $studentId, $currentYear, $currentSem) {
     // Check regular courses
@@ -2454,11 +2459,11 @@ if (!empty($studentId)) {
   }
 }
 
-// Special rule: for IRREGULAR students in 4-1 and 4-2,
+// Special rule: for IRREGULAR and PROBATIONARY students in 4-1 and 4-2,
 // allow an additional 6 units above the base limit.
 $studentClassification = strtolower(trim($student['classification'] ?? ''));
 $isIrregularForUi = isIrregularClassification((string)($student['classification'] ?? ''));
-if ($isIrregularForUi && !empty($program)) {
+if (canOverloadSubjects((string)($student['classification'] ?? '')) && !empty($program)) {
   foreach (['4-1', '4-2'] as $ys) {
     if (isset($unitLimits[$program][$ys])) {
       $unitLimits[$program][$ys]['max'] += 6.0;
@@ -3067,11 +3072,6 @@ try {
       '4-1' => '<i class="bi bi-7-circle me-2"></i> FOURTH YEAR • FIRST SEMESTER',
       '4-2' => '<i class="bi bi-8-circle me-2"></i> FOURTH YEAR • SECOND SEMESTER',
     ];
-    if (!empty($isIrregularForUi)) {
-      $labels['5-1'] = '<i class="bi bi-plus-circle me-2"></i> FIFTH YEAR • FIRST SEMESTER';
-      $labels['5-2'] = '<i class="bi bi-plus-circle-fill me-2"></i> FIFTH YEAR • SECOND SEMESTER';
-    }
-    
     // Get all irregular subjects for this student (load once for all semesters)
     $allIrregularSubjects = [];
     if (!empty($studentId)) {
@@ -3964,8 +3964,8 @@ if (!empty($curriculum)) {
       ?>
       <div class="row">
         <div class="col-md-6">
-          <label for="bulkYearSem" class="form-label">Select Year and Semester:</label>
-          <select class="form-select" id="bulkYearSem" required>
+          <label for="bulkYearSem" class="form-label">Target Year and Semester (optional):</label>
+          <select class="form-select" id="bulkYearSem">
             <option value="">Choose Year-Semester...</option>
             <option value="1-1">1st Year • First Semester</option>
             <option value="1-2">1st Year • Second Semester</option>
@@ -3975,10 +3975,6 @@ if (!empty($curriculum)) {
             <option value="3-2">3rd Year • Second Semester</option>
             <option value="4-1">4th Year • First Semester</option>
             <option value="4-2">4th Year • Second Semester</option>
-            <?php if ($isIrregularForUi): ?>
-            <option value="5-1">5th Year • First Semester</option>
-            <option value="5-2">5th Year • Second Semester</option>
-            <?php endif; ?>
           </select>
         </div>
         <div class="col-md-6 d-flex align-items-end">
@@ -4299,24 +4295,6 @@ if (!empty($curriculum)) {
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Hard-enforce hiding 5th-year choices for non-irregular students.
-    if (!window.isIrregularForUi) {
-      const fifthOptionSelectors = [
-        '#bulkYearSem option[value="5-1"]',
-        '#bulkYearSem option[value="5-2"]',
-        '#yearSelect option[value="5"]',
-        '#otherYearSelect option[value="5"]'
-      ];
-      document.querySelectorAll(fifthOptionSelectors.join(',')).forEach(function(opt) {
-        opt.remove();
-      });
-
-      // If 5th-year sections exist in DOM, hide them for regular students.
-      document.querySelectorAll('div.mb-4[data-ys="5-1"], div.mb-4[data-ys="5-2"]').forEach(function(el) {
-        el.remove();
-      });
-    }
-
     // Handle Select All for any semester
     document.addEventListener('click', function(e) {
         const selectAllBtn = e.target.closest('.select-semester');
@@ -5200,9 +5178,7 @@ document.addEventListener('DOMContentLoaded', function() {
         '3-1': 'Third Year - First Semester',
         '3-2': 'Third Year - Second Semester',
         '4-1': 'Fourth Year - First Semester',
-        '4-2': 'Fourth Year - Second Semester',
-        '5-1': 'Fifth Year - First Semester',
-        '5-2': 'Fifth Year - Second Semester'
+        '4-2': 'Fourth Year - Second Semester'
       };
       return map[ys] || ys;
     }
@@ -5424,8 +5400,7 @@ document.addEventListener('DOMContentLoaded', function() {
             listHTML += '</div>';
             selectedSubjectsList.innerHTML = listHTML;
             
-            // For irregular students, allow saving mixed year/semester selections.
-            bulkSaveBtn.disabled = isIrregularStudent ? false : !bulkYearSem.value;
+            bulkSaveBtn.disabled = count === 0;
         } else {
             renderUnitWarnings([]);
             selectedSubjectsInfo.style.display = 'none';
@@ -5452,29 +5427,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // Individual checkbox changes with prerequisite validation
     subjectCheckboxes.forEach(checkbox => {
       checkbox.addEventListener('change', function() {
-        const selectedYearSem = (bulkYearSem && bulkYearSem.value) ? bulkYearSem.value : '';
-        const subjectYearSem = getCheckboxYearSem(this);
-
-        if (!isIrregularStudent && this.checked && !selectedYearSem) {
-          this.checked = false;
-          showSwalWarning(
-            'Select Year and Semester First',
-            'Please select the target <strong>Year and Semester</strong> in Bulk Save before choosing subjects.'
-          );
-          updateSelectedDisplay();
-          return;
-        }
-
-        if (!isIrregularStudent && this.checked && selectedYearSem && subjectYearSem !== selectedYearSem) {
-          this.checked = false;
-          showSwalWarning(
-            'Subject Semester Mismatch',
-            `This subject belongs to <strong>${formatSelectedYearSemLabel(subjectYearSem)}</strong>.<br>Please select subjects only from <strong>${formatSelectedYearSemLabel(selectedYearSem)}</strong>.`
-          );
-          updateSelectedDisplay();
-          return;
-        }
-
         // Only validate when trying to select the subject
         if (this.checked) {
           const ok = checkPrerequisites(this);
@@ -5513,44 +5465,9 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Year-semester selection change
     bulkYearSem.addEventListener('change', function() {
-        const selectedYearSem = this.value || '';
-
-        if (isIrregularStudent) {
-          updateSelectedDisplay();
-          const hasSelection = document.querySelectorAll('.subject-checkbox:checked').length > 0;
-          bulkSaveBtn.disabled = !hasSelection;
-          return;
-        }
-
-        const mismatched = findMismatchedSelections(selectedYearSem);
-        if (selectedYearSem && mismatched.length > 0) {
-          mismatched.forEach(cb => {
-            cb.checked = false;
-          });
-
-          showSwalWarning(
-            'Selection Updated',
-            `Removed <strong>${mismatched.length}</strong> subject(s) that do not belong to <strong>${formatSelectedYearSemLabel(selectedYearSem)}</strong>.`
-          );
-        }
-
-        if (!selectedYearSem) {
-          const checkedNow = Array.from(document.querySelectorAll('.subject-checkbox:checked'));
-          if (checkedNow.length > 0) {
-            checkedNow.forEach(cb => {
-              cb.checked = false;
-            });
-
-            showSwalWarning(
-              'Year and Semester Required',
-              'Subject selection was cleared. Please choose a target <strong>Year and Semester</strong> first.'
-            );
-          }
-        }
-
         updateSelectedDisplay();
         const hasSelection = document.querySelectorAll('.subject-checkbox:checked').length > 0;
-        bulkSaveBtn.disabled = !this.value || !hasSelection;
+        bulkSaveBtn.disabled = !hasSelection;
     });
     
     // Clear selection
@@ -5571,20 +5488,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const summary = summarizeCheckedSubjects();
         const overloadWarnings = buildOverloadWarnings(summary);
         
-        if (!isIrregularStudent && !yearSem) {
-            if (typeof Swal !== 'undefined') {
-              Swal.fire({
-                icon: 'warning',
-                title: 'Missing Year and Semester',
-                text: 'Please select a year and semester first.',
-                confirmButtonText: 'OK'
-              });
-            } else {
-              alert('Please select a year and semester.');
-            }
-            return;
-        }
-        
         if (selectedCheckboxes.length === 0) {
             if (typeof Swal !== 'undefined') {
               Swal.fire({
@@ -5599,29 +5502,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        const mismatched = !isIrregularStudent
-          ? Array.from(selectedCheckboxes).filter(cb => getCheckboxYearSem(cb) !== yearSem)
-          : [];
-        if (!isIrregularStudent && mismatched.length > 0) {
-            const sample = mismatched.slice(0, 5).map(cb => cb.value || cb.dataset.code || '').filter(Boolean);
-            if (typeof Swal !== 'undefined') {
-              Swal.fire({
-                icon: 'error',
-                title: 'Semester Mismatch Detected',
-                html: `
-                  <p>${mismatched.length} selected subject(s) are not from <strong>${formatSelectedYearSemLabel(yearSem)}</strong>.</p>
-                  ${sample.length ? `<p>Examples: <strong>${sample.join(', ')}</strong></p>` : ''}
-                  <p>Please keep only subjects from the selected semester.</p>
-                `,
-                confirmButtonText: 'OK'
-              });
-            } else {
-              alert('Some selected subjects do not match the selected year and semester.');
-            }
-            return;
-        }
-
-        // For irregular mixed-semester selection, block save if any affected semester exceeds max units.
+        // Block save if any affected semester exceeds max units.
         if (overloadWarnings.length > 0) {
           const lines = overloadWarnings.map(w =>
             `<li><strong>${formatSemesterLabel(w.ys)}</strong>: ${w.afterTotal.toFixed(1)} / ${w.maxUnits.toFixed(1)} (over by ${w.overBy.toFixed(1)})</li>`
@@ -5646,53 +5527,6 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('Program:', program);
         console.log('Unit limits:', unitLimits);
         console.log('YearSem:', yearSem);
-        
-        // Get current semester units (already-graded curriculum + irregular) from server-rendered data attribute.
-        let currentUnits = 0;
-        const semesterBlock = yearSem ? document.querySelector(`div.mb-4[data-ys="${yearSem}"]`) : null;
-        if (semesterBlock) {
-          const currentAttr = parseFloat(semesterBlock.getAttribute('data-current-units') || '0');
-          if (!Number.isNaN(currentAttr)) {
-            currentUnits = currentAttr;
-          }
-        }
-        
-        console.log('Current irregular units:', currentUnits);
-        
-        // Calculate units of selected subjects
-        let selectedUnits = 0;
-        selectedCheckboxes.forEach(checkbox => {
-            const units = parseFloat(checkbox.dataset.units) || 0;
-            selectedUnits += units;
-        });
-        
-        const totalUnitsAfter = currentUnits + selectedUnits;
-        let maxUnits = unitLimits[program] && unitLimits[program][yearSem] ? unitLimits[program][yearSem].max : 26;
-        
-        // Check if adding these subjects would exceed the limit
-        if (!isIrregularStudent && totalUnitsAfter > maxUnits) {
-            const overBy = (totalUnitsAfter - maxUnits).toFixed(1);
-           Swal.fire({
-    icon: 'error',
-    title: 'Unit Limit Exceeded',
-    html: `
-        <div style="text-align:left;">
-            <p><strong>Cannot add subjects:</strong> Unit limit would be exceeded.</p>
-            <hr>
-            <p><strong>Current units:</strong> ${currentUnits.toFixed(1)}</p>
-            <p><strong>Adding:</strong> ${selectedUnits.toFixed(1)} units</p>
-            <p><strong>Total after adding:</strong> ${totalUnitsAfter.toFixed(1)} units</p>
-            <p><strong>Maximum allowed:</strong> ${maxUnits} units</p>
-            <p><strong>Over limit by:</strong> ${overBy} units</p>
-            <hr>
-            <p>Please remove some subjects or choose a different semester.</p>
-        </div>
-    `,
-    confirmButtonText: 'Okay',
-});
-
-            return;
-        }
         
         const [year, sem] = yearSem ? yearSem.split('-') : ['', ''];
         const studentId = '<?= htmlspecialchars($studentId) ?>';

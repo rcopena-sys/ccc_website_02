@@ -98,7 +98,6 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['student_id'])) {
     header("Location: index.php");
     exit();
 }
-session_start();
 require_once __DIR__ . '/../db_connect.php';
 
 // Initialize student data

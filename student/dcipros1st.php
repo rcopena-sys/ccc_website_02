@@ -993,11 +993,7 @@ function calculateYearlyUnits($courses) {
                     <i class="bi bi-book"></i> Fourth Year
                 </a>
             </li>
-            <li class="nav-item mb-2">
-                <a href="#" class="nav-link text-white" data-bs-toggle="modal" data-bs-target="#fifthYearModal">
-                    <i class="bi bi-book"></i> Fifth Year
-                </a>
-            </li>
+           
               <li class="nav-item mb-2">
                 <a href="print_prospectus.php" class="nav-link text-white">
                     <i class="bi bi-printer"></i> Print Prospectus

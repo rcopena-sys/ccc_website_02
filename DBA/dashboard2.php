@@ -290,15 +290,59 @@ $conn->close();
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Cache-bust DBA theme so latest blue palette is always loaded -->
   <link rel="stylesheet" href="dba-theme.css?v=2">
+  <link rel="stylesheet" href="../dashboard-theme.css">
   <style>
     #clock {
       font-family: 'Arial', sans-serif;
       font-size: 1.2rem;
       font-weight: bold;
     }
+
+    body {
+      overflow-x: hidden;
+    }
+
+    #sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 16rem;
+      height: 100vh;
+      z-index: 40;
+      transition: transform 0.3s ease-in-out;
+      will-change: transform;
+    }
+
+    #sidebar.collapsed {
+      transform: translateX(-100%);
+    }
+
+    main.dashboard-main {
+      margin-left: 16rem;
+      transition: margin-left 0.3s ease-in-out;
+      min-width: 0;
+    }
+
+    main.dashboard-main.expanded {
+      margin-left: 0;
+    }
+
+    @media (max-width: 768px) {
+      #sidebar {
+        transform: translateX(-100%);
+      }
+
+      #sidebar:not(.collapsed) {
+        transform: translateX(0);
+      }
+
+      main.dashboard-main {
+        margin-left: 0;
+      }
+    }
   </style>
 </head>
-<body class="flex bg-blue-100 min-h-screen">
+<body class="bg-blue-100 min-h-screen">
   <!-- Sidebar Toggle Button -->
   <button id="sidebarToggle" class="fixed top-4 left-4 z-50 bg-transparent p-2 focus:outline-none hover:bg-white hover:bg-opacity-20 rounded transition-colors">
     <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -429,112 +473,142 @@ $conn->close();
   </aside>
 
   <!-- Main Content -->
-  <main class="flex-1 p-10 relative" style="background-image: url('cccd.jpg'); background-size: cover; background-position: center; background-attachment: fixed; background-repeat: no-repeat;">
-  <div class="absolute top-4 right-48 flex items-center space-x-4">
-    <div class="flex items-center space-x-4">
-      <a href="notification_page.php" class="bg-white bg-opacity-70 p-2 rounded-full shadow hover:bg-opacity-100 transition-all duration-200 relative">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-        </svg>
-      </a>
-      <div id="clock" class="bg-white bg-opacity-70 px-4 py-2 rounded shadow"></div>
-    </div>
-  </div>
-  </div>
-
-  <div class="bg-white bg-opacity-90 rounded-lg p-6 shadow-md">
-    <div class="flex justify-center mb-6">
-      <img src="psa.png" alt="DCI Logo" class="h-32 w-auto">
-    </div>
-    <h1 class="text-3xl font-bold text-center text-blue-600 mb-8">Department of Business and Accountancy</h1>
-
-    <!-- Dashboard Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mt-10">
-      <div class="bg-white text-blue-600 border-2 border-blue-600 p-6 rounded-lg shadow-lg">
-        <div class="text-xl font-semibold">Total Students</div>
-        <div class="text-3xl font-bold mt-2"><?php echo $total_students; ?></div>
-      </div>
-      <div class="bg-white text-blue-600 border-2 border-blue-600 p-6 rounded-lg shadow-lg">
-        <div class="text-xl font-semibold">Curriculum</div>
-        <div class="text-3xl font-bold mt-2"><?php echo $curriculum_count; ?></div>
-      </div>
-      <a href="list.php?program=BSIT" class="bg-white text-blue-600 border-2 border-blue-600 p-6 rounded-lg shadow-lg block hover:bg-blue-50 transition">
-        <div class="text-xl font-semibold">BSAIS</div>
-        <div class="text-3xl font-bold mt-2">
-          <?php echo $bsit_count ?? 0; ?>
-        </div>
-      </a>
-      <a href="list.php?program=BSCS" class="bg-white text-blue-600 border-2 border-blue-600 p-6 rounded-lg shadow-lg block hover:bg-blue-50 transition">
-        <div class="text-xl font-semibold">BSA</div>
-        <div class="text-3xl font-bold mt-2">
-          <?php echo $bscs_count ?? 0; ?>
-        </div>
-      </a>
-    </div>
-
-    <!-- Additional Statistics Section -->
-    <div class="bg-white bg-opacity-90 rounded-lg p-6 shadow-md mt-10" style="position: relative; z-index: 10;">
-      <h2 class="text-2xl font-bold text-blue-600 mb-6">Statistics Overview</h2>
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <div class="bg-blue-50 p-4 rounded shadow">
-          <div class="text-lg font-semibold text-blue-700">Curriculum in Operation</div>
-          <div class="text-2xl font-bold mt-2"><?php echo $curriculum_count; ?></div>
-        </div>
-        <div class="bg-blue-50 p-4 rounded shadow">
-          <div class="text-lg font-semibold text-blue-700">Total Population</div>
-          <div class="text-2xl font-bold mt-2"><?php echo number_format($total_population); ?></div>
-        </div>
-         <a href="regularstu.php" class="block bg-blue-50 p-4 rounded shadow hover:bg-blue-100 transition duration-200 transform hover:scale-105">
-          <div class="text-lg font-semibold text-blue-700">Regular Students</div>
-          <div class="text-2xl font-bold mt-2">
-            <?php echo number_format($regular_count); ?>
-          </div>
-        </a>
-        <a href="irregularstu.php" class="block bg-blue-50 p-4 rounded shadow hover:bg-blue-100 transition duration-200 transform hover:scale-105">
-          <div class="text-lg font-semibold text-blue-700">Irregular Students</div>
-          <div class="text-2xl font-bold mt-2">
-            <?php echo number_format($irregular_count); ?>
-          </div>
-        </a>
-       
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+  <main class="dashboard-main flex-1">
+    <div class="dashboard-shell">
+      <section class="dashboard-topbar topbar">
         <div>
-         
-          
-              
-            </tbody>
-          </table>
+          <div class="dashboard-kicker">Dean Dashboard</div>
+          <h1>Department of Business and Accountancy</h1>
+          <p>Live enrollment overview for BSAIS and BSA programs.</p>
         </div>
-        <div>
-          <h3 class="text-lg font-semibold text-blue-700 mb-2">Gender Distribution</h3>
-          <canvas id="genderPieChart" width="300" height="300"></canvas>
+        <div class="topbar-actions">
+          <div class="pill-action">
+            <i class="fas fa-sync-alt"></i>
+            <span>Updated <?php echo date('M d, Y h:i A'); ?></span>
+          </div>
+          <a href="notification_page.php" class="pill-action relative">
+            <i class="bi bi-bell"></i>
+            <span>Notifications</span>
+            <?php if ($unread_count > 0): ?>
+              <strong class="ml-1 text-red-500"><?php echo $unread_count; ?></strong>
+            <?php endif; ?>
+          </a>
         </div>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-       
-            </thead>
-           
-          </table>
+      </section>
+
+      <section class="dashboard-stats">
+        <div class="metric-card">
+          <div class="metric-label">Total Students</div>
+          <div class="metric-value"><?php echo number_format($total_students); ?></div>
+          <div class="metric-note">Combined BSAIS and BSA population.</div>
         </div>
-      </div>
-    </div>
-    <div class="bg-white bg-opacity-90 rounded-lg p-6 shadow-md mt-10 sticky top-0">
-      <h2 class="text-2xl font-bold text-blue-600 mb-6">Year Level Regular/Irregular Pie Charts</h2>
-      <div class="flex flex-wrap gap-8 justify-center">
-        <?php foreach ($year_levels as $level): ?>
-          <div class="bg-white p-4 rounded shadow" style="position: relative;">
-            <h3 class="font-semibold text-center mb-2"><?php echo $level; ?> Year</h3>
-            <div class="h-48" style="position: relative;">
-              <canvas id="pie_<?php echo $level; ?>"></canvas>
+        <div class="metric-card">
+          <div class="metric-label">Curriculum</div>
+          <div class="metric-value"><?php echo number_format($curriculum_count); ?></div>
+          <div class="metric-note">Curriculum entries in operation.</div>
+        </div>
+        <a href="list.php?program=BSIT" class="metric-card link-card block no-underline text-inherit">
+          <div class="metric-label">BSAIS</div>
+          <div class="metric-value"><?php echo number_format($bscs_count); ?></div>
+          <div class="metric-note">Students enrolled in BSAIS.</div>
+        </a>
+        <a href="list.php?program=BSCS" class="metric-card link-card block no-underline text-inherit">
+          <div class="metric-label">BSA</div>
+          <div class="metric-value"><?php echo number_format($bsit_count); ?></div>
+          <div class="metric-note">Students enrolled in BSA.</div>
+        </a>
+      </section>
+
+      <section class="dashboard-grid">
+        <div class="chart-card panel-card">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Student Population by Program</div>
+              <div class="panel-subtitle">Current distribution across the department.</div>
+            </div>
+            <div class="panel-badge">Live</div>
+          </div>
+          <div class="chart-frame">
+            <canvas id="programChart"></canvas>
+          </div>
+        </div>
+
+        <div class="right-stack">
+          <div class="chart-card panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Classification Distribution</div>
+                <div class="panel-subtitle">Regular versus irregular students.</div>
+              </div>
+              <div class="panel-badge">Live</div>
+            </div>
+            <div class="chart-frame small">
+              <canvas id="statusChart"></canvas>
             </div>
           </div>
-        <?php endforeach; ?>
-      </div>
+
+          <div class="mini-grid">
+            <div class="mini-card">
+              <div class="panel-title" style="margin-bottom:6px;">Gender Distribution</div>
+              <div class="panel-subtitle" style="margin-bottom:12px;">Breakdown by gender.</div>
+              <div class="chart-frame small">
+                <canvas id="genderChart"></canvas>
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="panel-title" style="margin-bottom:12px;">Academic Summary</div>
+              <div class="summary-stack">
+                <div class="summary-chip"><strong>Total Population</strong><span><?php echo number_format($total_population); ?></span></div>
+                <div class="summary-chip"><strong>Regular Students</strong><span><?php echo number_format($regular_count); ?></span></div>
+                <div class="summary-chip"><strong>Irregular Students</strong><span><?php echo number_format($irregular_count); ?></span></div>
+                <div class="summary-chip"><strong>Scope</strong><span><?php echo $selected_fiscal_year ? htmlspecialchars($selected_fiscal_year) : 'All Years'; ?></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="chart-card panel-card">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Year Level Breakdown</div>
+            <div class="panel-subtitle">Regular and irregular counts for each year level.</div>
+          </div>
+          <div class="panel-badge">Overview</div>
+        </div>
+        <div class="flex flex-wrap gap-4 justify-center">
+          <?php foreach ($year_levels as $level): ?>
+            <div class="bg-white p-4 rounded shadow" style="position: relative; min-width: 240px; flex: 1 1 240px;">
+              <h3 class="font-semibold text-center mb-2"><?php echo $level; ?> Year</h3>
+              <div class="h-48" style="position: relative;">
+                <canvas id="pie_<?php echo $level; ?>"></canvas>
+              </div>
+            </div>
+          <?php endforeach; ?>
+        </div>
+      </section>
+
+      <section class="dashboard-section">
+        <h2 class="section-title">Statistics Overview</h2>
+        <p class="section-subtitle">Quick status cards for the current filter.</p>
+        <div class="hero-metrics" style="margin-top:16px;">
+          <div class="hero-metric">
+            <div class="hero-metric-label">Curriculum in Operation</div>
+            <div class="hero-metric-value"><?php echo number_format($curriculum_count); ?></div>
+          </div>
+          <div class="hero-metric">
+            <div class="hero-metric-label">Total Population</div>
+            <div class="hero-metric-value"><?php echo number_format($total_population); ?></div>
+          </div>
+          <div class="hero-metric">
+            <div class="hero-metric-label">Regular Students</div>
+            <div class="hero-metric-value"><?php echo number_format($regular_count); ?></div>
+          </div>
+        </div>
+      </section>
     </div>
-    <!-- End Additional Statistics Section -->
-  </div>
-</main>
+  </main>
 
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -745,12 +819,17 @@ $conn->close();
         second: '2-digit',
         hour12: true 
       });
-      document.getElementById('clock').textContent = timeString;
+      const clockElement = document.getElementById('clock');
+      if (clockElement) {
+        clockElement.textContent = timeString;
+      }
     }
     
     // Update clock immediately and then every second
     updateClock();
-    setInterval(updateClock, 1000);
+    if (document.getElementById('clock')) {
+      setInterval(updateClock, 1000);
+    }
 
     // Student Dropdown
     const btn = document.getElementById('studentDropdownBtn');
@@ -826,27 +905,6 @@ $conn->close();
   <!-- Chart.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
-    // Gender Pie Chart
-    const ctx = document.getElementById('genderPieChart').getContext('2d');
-    const genderPieChart = new Chart(ctx, {
-      type: 'pie',
-      data: {
-        labels: ['Male', 'Female'],
-        datasets: [{
-          data: [<?php echo $gender_counts['Male']; ?>, <?php echo $gender_counts['Female']; ?>],
-          backgroundColor: ['#3b82f6', '#f472b6'],
-        }]
-      },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: {
-            position: 'bottom',
-          },
-        },
-      },
-    });
-
     // Initialize year level charts
     document.addEventListener('DOMContentLoaded', function() {
       <?php if (isset($year_levels) && is_array($year_levels)): ?>
@@ -859,7 +917,7 @@ $conn->close();
             labels: ['Regular', 'Irregular'],
             datasets: [{
               data: [<?php echo $year_level_data[$level]['Regular'] ?? 0; ?>, <?php echo $year_level_data[$level]['Irregular'] ?? 0; ?>],
-              backgroundColor: ['#3b82f6', '#f472b6'],
+                  backgroundColor: ['#3b82f6', '#f472b6'],
             }]
           },
           options: {
