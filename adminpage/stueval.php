@@ -4024,6 +4024,7 @@ if (!empty($curriculum)) {
       <?php
         $studentClassForUi = strtolower(trim($student['classification'] ?? ''));
         $isIrregularForUi = strpos($studentClassForUi, 'irregular') !== false;
+        $canSwitchCurriculumForUi = canSwitchCurriculumProgram((string)($student['classification'] ?? ''));
       ?>
       <div class="row">
         <div class="col-md-6">
@@ -4051,7 +4052,7 @@ if (!empty($curriculum)) {
           </div>
         </div>
       </div>
-      <?php if ($isIrregularForUi): ?>
+      <?php if ($canSwitchCurriculumForUi): ?>
       <div class="row mt-3">
         <div class="col-md-12 d-flex justify-content-start">
           <button type="button" id="openOtherProgramModal" class="btn btn-outline-primary">
@@ -4214,7 +4215,7 @@ if (!empty($curriculum)) {
                 <option value="2">2nd Year</option>
                 <option value="3">3rd Year</option>
                 <option value="4">4th Year</option>
-                <?php if (!empty($isIrregularForUi)): ?>
+                <?php if (!empty($canSwitchCurriculumForUi)): ?>
                 <option value="5">5th Year</option>
                 <?php endif; ?>
               </select>
@@ -4299,7 +4300,7 @@ if (!empty($curriculum)) {
               <option value="2">2nd Year</option>
               <option value="3">3rd Year</option>
               <option value="4">4th Year</option>
-              <?php if (!empty($isIrregularForUi)): ?>
+              <?php if (!empty($canSwitchCurriculumForUi)): ?>
               <option value="5">5th Year</option>
               <?php endif; ?>
             </select>
