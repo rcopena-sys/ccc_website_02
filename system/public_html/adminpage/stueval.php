@@ -189,6 +189,44 @@ function latestFiscalYear(mysqli $conn, string $program): ?string {
     return $fy ?: null;
 }
 
+  function loadAvailablePrograms(mysqli $conn): array {
+    $availablePrograms = [];
+
+    if (columnExists($conn, 'curriculum', 'program')) {
+      $currRes = $conn->query("SELECT DISTINCT program FROM curriculum WHERE program IS NOT NULL AND program != '' ORDER BY program");
+      if ($currRes instanceof mysqli_result) {
+        while ($row = $currRes->fetch_assoc()) {
+          $programName = trim((string)($row['program'] ?? ''));
+          if ($programName !== '') {
+            $availablePrograms[] = $programName;
+          }
+        }
+      }
+    }
+
+    $availablePrograms = array_values(array_unique($availablePrograms));
+    if (empty($availablePrograms)) {
+      $availablePrograms = ['BSCS', 'BSIT'];
+    }
+
+    return $availablePrograms;
+  }
+
+  function canonicalizeProgramName(string $program, array $availablePrograms): string {
+    $program = strtoupper(trim($program));
+    if ($program === '') {
+      return '';
+    }
+
+    foreach ($availablePrograms as $availableProgram) {
+      if (strcasecmp($program, (string)$availableProgram) === 0) {
+        return (string)$availableProgram;
+      }
+    }
+
+    return $program;
+  }
+
 // Add back inline grade edit support
 function gradeColumn(mysqli $conn): string {
     return columnExists($conn, 'grades_db', 'final_grade') ? 'final_grade' : 'grade';
@@ -946,6 +984,12 @@ if (strpos($program, 'BSIT') !== false) {
 // Debug: Log the detected program
 error_log("Final program detected for student $studentId: '$program'");
 
+$availablePrograms = loadAvailablePrograms($conn);
+
+if ($program !== '') {
+  $program = canonicalizeProgramName($program, $availablePrograms);
+}
+
 if ($fiscalYear === '') {
     $fy = latestFiscalYear($conn, $program);
     if ($fy) $fiscalYear = $fy;
@@ -1577,8 +1621,12 @@ foreach ($ysOrder as $ys) {
       <div class="col-sm-3">
         <label class="form-label">Program</label>
         <select name="program" class="form-select">
-          <option value="BSCS" <?= $program==='BSCS'?'selected':'' ?>>BSCS</option>
-          <option value="BSIT" <?= $program==='BSIT'?'selected':'' ?>>BSIT</option>
+          <option value="">Select Program...</option>
+          <?php foreach ($availablePrograms as $programOption): ?>
+            <option value="<?= htmlspecialchars($programOption) ?>" <?= $program === $programOption ? 'selected' : '' ?>>
+              <?= htmlspecialchars($programOption) ?>
+            </option>
+          <?php endforeach; ?>
         </select>
       </div>
       <?php if (columnExists($conn, 'curriculum', 'fiscal_year')): ?>

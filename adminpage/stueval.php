@@ -37,6 +37,10 @@ function isRegularStudent($studentData) {
     return isIrregularClassification($classification) || preg_match('/\bprobationary\b/i', $classification) === 1;
   }
 
+  function canSwitchCurriculumProgram(string $classification): bool {
+    return canOverloadSubjects($classification);
+  }
+
 // Check if a student should be classified as irregular
 function checkIrregularStatus($conn, $studentId, $currentYear, $currentSem) {
     // Check regular courses
@@ -325,6 +329,30 @@ function latestFiscalYear(mysqli $conn, string $program): ?string {
     $fy = $row['fiscal_year'] ?? null;
     $stmt->close();
     return $fy ?: null;
+}
+
+function loadCurriculumPrograms(mysqli $conn): array {
+  $programs = [];
+
+  if (columnExists($conn, 'curriculum', 'program')) {
+    $res = $conn->query("SELECT DISTINCT program FROM curriculum WHERE program IS NOT NULL AND program != '' ORDER BY program");
+    if ($res instanceof mysqli_result) {
+      while ($row = $res->fetch_assoc()) {
+        $programName = strtoupper(trim((string)($row['program'] ?? '')));
+        if ($programName !== '') {
+          $programs[] = $programName;
+        }
+      }
+    }
+  }
+
+  $programs = array_values(array_unique($programs));
+  if (empty($programs)) {
+    $programs = ['BSCS', 'BSIT'];
+  }
+
+  sort($programs);
+  return $programs;
 }
 
 // Add back inline grade edit support
@@ -1684,13 +1712,13 @@ error_log("Student data: " . print_r($student, true));
 // Determine student classification (if available)
 $studentClassification = strtolower(trim($student['classification'] ?? ''));
 
-// Normalize program name
-// If the student is irregular and a valid program was selected in the form,
-// prefer that selection for the curriculum program.
-$program = '';
-if (strpos($studentClassification, 'irregular') !== false && in_array($formProgram, ['BSIT', 'BSCS'], true)) {
-  $program = $formProgram;
-}
+$studentEnrolledProgram = strtoupper(trim((string)($student['course'] ?? $student['program'] ?? $student['program_name'] ?? $student['programs'] ?? '')));
+
+$curriculumPrograms = loadCurriculumPrograms($conn);
+
+// Normalize program name.
+// The form selection is treated as a view-only curriculum choice.
+$program = in_array($formProgram, $curriculumPrograms, true) ? $formProgram : '';
 
 // If we still don't have a program, try to get it from different possible
 // field names on the student record.
@@ -1811,16 +1839,12 @@ if (empty($program) && !empty($studentId)) {
     }
 }
 
-// Check for program in various formats
+// Keep the selected curriculum program only if it exists in the curriculum table.
 $program = strtoupper(trim($program));
-if (strpos($program, 'BSIT') !== false) {
-    $program = 'BSIT';
-} elseif (strpos($program, 'BSCS') !== false) {
-    $program = 'BSCS';
-} else {
-    // If we still can't determine the program, show an error but don't default
-    error_log("Warning: Could not determine program for student $studentId. Program value: " . ($program ?: 'empty'));
-    $program = ''; // Will trigger the program selection form
+if ($program !== '' && !in_array($program, $curriculumPrograms, true)) {
+  // If the selected program does not exist in the curriculum table, fall back to the student's program.
+  error_log("Warning: Selected program '$program' is not present in curriculum for student $studentId.");
+  $program = '';
 }
 
 // Debug: Log the detected program
@@ -2359,17 +2383,15 @@ foreach ($ysOrder as $ys) {
   $maxUnitsPerSemester[$ys] = $total;
 }
 
-// Build a unit limit configuration per program and semester
+// Build a unit limit configuration per program and semester.
 // Used by the frontend to prevent exceeding the curriculum load.
-$unitLimits = [
-  'BSIT' => [],
-  'BSCS' => [],
-];
-
-foreach ($ysOrder as $ys) {
-  $limit = $maxUnitsPerSemester[$ys] ?? 26; // Fallback to 26 if not found
-  $unitLimits['BSIT'][$ys] = ['max' => $limit];
-  $unitLimits['BSCS'][$ys] = ['max' => $limit];
+$unitLimits = [];
+foreach ($curriculumPrograms as $curriculumProgram) {
+  $unitLimits[$curriculumProgram] = [];
+  foreach ($ysOrder as $ys) {
+    $limit = $maxUnitsPerSemester[$ys] ?? 26; // Fallback to 26 if not found
+    $unitLimits[$curriculumProgram][$ys] = ['max' => $limit];
+  }
 }
 
 // Compute effective academic year based on passed subjects per year/semester
@@ -2556,6 +2578,7 @@ try {
     window.studentClassification = <?php echo json_encode($student['classification'] ?? ''); ?>;
     // Source of truth for UI gating of irregular-only controls.
     window.isIrregularForUi = <?php echo !empty($isIrregularForUi) ? 'true' : 'false'; ?>;
+    window.canSwitchCurriculum = <?php echo !empty($canSwitchCurriculum) ? 'true' : 'false'; ?>;
     window.deletedAutoloadBlockKeys = <?php echo json_encode($deletedAutoloadBlockKeysForUi ?? []); ?>;
     // Effective academic year (promotion based on 1-1,1-2,2-1,2-2,3-1,3-2,4-1,4-2)
     window.effectiveYearLevel = <?php echo (int)$effectiveYearLevel; ?>;
@@ -2931,11 +2954,16 @@ try {
         <input type="text" name="student_id" class="form-control" value="<?= htmlspecialchars($studentId) ?>" required>
       </div>
       <div class="col-sm-3">
-        <label class="form-label">Program</label>
+        <label class="form-label">Curriculum Program</label>
         <select name="program" class="form-select">
-          <option value="BSCS" <?= $program==='BSCS'?'selected':'' ?>>BSCS</option>
-          <option value="BSIT" <?= $program==='BSIT'?'selected':'' ?>>BSIT</option>
+          <option value="">Select Curriculum...</option>
+          <?php foreach ($curriculumPrograms as $programOption): ?>
+            <option value="<?= htmlspecialchars($programOption) ?>" <?= $program === $programOption ? 'selected' : '' ?>>
+              <?= htmlspecialchars($programOption) ?>
+            </option>
+          <?php endforeach; ?>
         </select>
+        <div class="form-text">Select a curriculum to view. This does not change the student's enrolled course.</div>
       </div>
       <?php if (columnExists($conn, 'curriculum', 'fiscal_year')): ?>
       <div class="col-sm-3">
@@ -2980,6 +3008,9 @@ try {
       <p class="text-muted mb-2">Office of the College Registrar</p>
       <div class="d-flex justify-content-center align-items-center gap-3">
         <span class="badge bg-primary badge-program"><?= htmlspecialchars($program) ?></span>
+        <?php if (!empty($studentEnrolledProgram)): ?>
+          <span class="badge bg-dark">Enrolled <?= htmlspecialchars($studentEnrolledProgram) ?></span>
+        <?php endif; ?>
         <?php if ($fiscalYear): ?>
           <span class="badge bg-secondary">Curriculum <?= htmlspecialchars($fiscalYear) ?></span>
         <?php endif; ?>
@@ -4201,7 +4232,7 @@ if (!empty($curriculum)) {
         <div class="row mb-3">
           <div class="col-md-4">
             <label class="form-label">Program</label>
-            <input type="hidden" id="otherProgramSelect" value="<?= htmlspecialchars($program) ?>">
+            <input type="hidden" id="otherProgramSelect" value="<?= htmlspecialchars($studentEnrolledProgram ?: $program) ?>">
             <div class="form-control bg-light">
               <strong><?= htmlspecialchars($program) ?></strong>
               <span class="text-muted small d-block">(Student's enrolled program)</span>
@@ -5021,7 +5052,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const selectedCount = document.getElementById('selectedCount');
     const selectedSubjectsList = document.getElementById('selectedSubjectsList');
     const totalUnitsBadge = document.getElementById('totalUnitsBadge');
-    const selectedProgram = '<?= htmlspecialchars($program ?: 'BSIT') ?>';
+    const selectedProgram = '<?= htmlspecialchars($studentEnrolledProgram ?: ($program ?: ($curriculumPrograms[0] ?? ''))) ?>';
     const unitLimits = <?= json_encode($unitLimits) ?>;
     const studentClassification = String(window.studentClassification || '').toLowerCase();
     const isIrregularStudent = studentClassification.includes('irregular');
@@ -5617,7 +5648,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const otherTableBody = document.querySelector('#otherProgramSubjectsTable tbody');
 
     const studentIdForOther = '<?= htmlspecialchars($studentId) ?>';
-    const limitProgramKey = '<?= htmlspecialchars($program ?: 'BSIT') ?>';
+    const limitProgramKey = '<?= htmlspecialchars($studentEnrolledProgram ?: ($program ?: ($curriculumPrograms[0] ?? ''))) ?>';
 
     if (otherProgramBtn && otherProgramModalEl && otherProgramSelect && otherYearSelect && otherSemSelect && loadOtherBtn && otherTableBody && studentIdForOther) {
       const otherProgramModal = new bootstrap.Modal(otherProgramModalEl);
