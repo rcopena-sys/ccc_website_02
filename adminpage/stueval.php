@@ -41,6 +41,24 @@ function isRegularStudent($studentData) {
     return canOverloadSubjects($classification);
   }
 
+  function resolveLimitProgram(string $program): string {
+    $program = strtoupper(trim($program));
+
+    if ($program === '') {
+      return '';
+    }
+
+    if (preg_match('/\bBSIT\b/i', $program) || strpos($program, 'INFORMATION TECHNOLOGY') !== false) {
+      return 'BSIT';
+    }
+
+    if (preg_match('/\bBSCS\b/i', $program) || strpos($program, 'COMPUTER SCIENCE') !== false) {
+      return 'BSCS';
+    }
+
+    return $program;
+  }
+
 // Check if a student should be classified as irregular
 function checkIrregularStatus($conn, $studentId, $currentYear, $currentSem) {
     // Check regular courses
@@ -1037,7 +1055,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['grade'])) {
     exit;
 }
 
-// AJAX: return subjects for a different program (used for irregular students cross-enrolling)
+// AJAX: return subjects for the student's enrolled curriculum program and fiscal year.
 if (isset($_GET['action']) && $_GET['action'] === 'get_other_program_subjects') {
   header('Content-Type: application/json');
 
@@ -1063,28 +1081,26 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_other_program_subjects') 
     }
   }
 
-  $otherProgram = strtoupper(trim($_GET['program'] ?? ''));
+  $requestedProgram = strtoupper(trim($_GET['program'] ?? ''));
+  $requestedFiscalYear = trim($_GET['fiscal_year'] ?? '');
   $year = (int)($_GET['year'] ?? 0);
   $sem  = (int)($_GET['sem'] ?? 0);
 
-  // VALIDATION: Only allow loading courses for the student's enrolled program
-  if ($otherProgram === '' || $year <= 0 || $sem <= 0) {
+  $programFilter = $requestedProgram !== '' ? $requestedProgram : $studentProgram;
+
+  // VALIDATION: Only allow loading courses for the student's enrolled curriculum
+  if ($programFilter === '' || $year <= 0 || $sem <= 0) {
     echo json_encode([
       'success' => false,
-      'message' => 'Missing or invalid program / year / semester',
+      'message' => 'Missing or invalid curriculum program / year / semester',
       'data'    => []
     ]);
     exit;
   }
 
-  // SECURITY: Ensure requested program matches student's enrolled program
-  if (!$studentProgram || $otherProgram !== $studentProgram) {
-    echo json_encode([
-      'success' => false,
-      'message' => 'Access denied. Can only load courses for your enrolled program (' . htmlspecialchars($studentProgram) . ').',
-      'data'    => []
-    ]);
-    exit;
+  // If the request includes a program, load that curriculum directly.
+  if ($requestedProgram !== '' && $studentProgram !== '' && $requestedProgram !== $studentProgram) {
+    error_log("stueval.php: loading requested program '$requestedProgram' instead of enrolled program '$studentProgram' for student $reqStudentId");
   }
 
   try {
@@ -1110,7 +1126,13 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_other_program_subjects') 
 
     if (columnExists($conn, 'curriculum', 'program')) {
       $sql    .= " AND program = ?";
-      $params[] = $otherProgram;
+      $params[] = $programFilter;
+      $types   .= 's';
+    }
+
+    if ($requestedFiscalYear !== '' && columnExists($conn, 'curriculum', 'fiscal_year')) {
+      $sql    .= " AND fiscal_year = ?";
+      $params[] = $requestedFiscalYear;
       $types   .= 's';
     }
 
@@ -1416,11 +1438,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           // Determine which program label to store with these irregular subjects.
           // Prefer an explicit program from the request; otherwise fall back to a safe default.
           $effectiveProgram = '';
-          if (!empty($data['program'])) {
-            $effectiveProgram = strtoupper(trim((string)$data['program']));
+          if (!empty($data['student_id'])) {
+            $programLookupStmt = $conn->prepare("SELECT course FROM signin_db WHERE student_id = ? LIMIT 1");
+            if ($programLookupStmt) {
+              $programLookupStmt->bind_param('s', $data['student_id']);
+              $programLookupStmt->execute();
+              $programLookupRes = $programLookupStmt->get_result();
+              if ($programLookupRes && ($programLookupRow = $programLookupRes->fetch_assoc())) {
+                $effectiveProgram = strtoupper(trim((string)($programLookupRow['course'] ?? '')));
+              }
+              $programLookupStmt->close();
+            }
           }
-          if ($effectiveProgram === '') {
-            $effectiveProgram = 'BSIT'; // Fallback when not specified
+          if ($effectiveProgram === '' && !empty($data['program'])) {
+            $effectiveProgram = strtoupper(trim((string)$data['program']));
           }
             
             // Determine actual column names in irregular_db
@@ -1713,6 +1744,7 @@ error_log("Student data: " . print_r($student, true));
 $studentClassification = strtolower(trim($student['classification'] ?? ''));
 
 $studentEnrolledProgram = strtoupper(trim((string)($student['course'] ?? $student['program'] ?? $student['program_name'] ?? $student['programs'] ?? '')));
+$studentLimitProgram = resolveLimitProgram($studentEnrolledProgram);
 
 $curriculumPrograms = loadCurriculumPrograms($conn);
 
@@ -4220,22 +4252,44 @@ if (!empty($curriculum)) {
   </div>
 </div>
 
-<!-- Other Program Subjects Modal (for irregular students) -->
+<!-- Curriculum Subjects Modal (for irregular students) -->
 <div class="modal fade" id="otherProgramModal" tabindex="-1" aria-labelledby="otherProgramModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="otherProgramModalLabel">Add Subject from Other Program</h5>
+        <h5 class="modal-title" id="otherProgramModalLabel">Add Subject from Your Curriculum</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
         <div class="row mb-3">
           <div class="col-md-4">
-            <label class="form-label">Program</label>
-            <input type="hidden" id="otherProgramSelect" value="<?= htmlspecialchars($studentEnrolledProgram ?: $program) ?>">
+            <label class="form-label" for="otherProgramSelect">Curriculum Program</label>
+            <select class="form-select" id="otherProgramSelect">
+              <?php
+                $defaultProgram = strtoupper(trim((string)($studentEnrolledProgram ?: $program)));
+                $programOptions = !empty($availablePrograms) ? $availablePrograms : $curriculumPrograms;
+                if (!empty($defaultProgram) && !in_array($defaultProgram, $programOptions, true)) {
+                  array_unshift($programOptions, $defaultProgram);
+                }
+                foreach ($programOptions as $programOption) {
+                  $programOption = strtoupper(trim((string)$programOption));
+                  if ($programOption === '') {
+                    continue;
+                  }
+                  $selected = $programOption === $defaultProgram ? 'selected' : '';
+                  echo '<option value="' . htmlspecialchars($programOption) . '" ' . $selected . '>' . htmlspecialchars($programOption) . '</option>';
+                }
+              ?>
+            </select>
+            <div class="form-text">Choose the program whose curriculum subjects you want to load.</div>
+            <div class="mt-2 small text-muted">
+              Unit cap follows enrolled program: <strong><?= htmlspecialchars($studentLimitProgram ?: 'Not detected') ?></strong>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Curriculum Fiscal Year</label>
             <div class="form-control bg-light">
-              <strong><?= htmlspecialchars($program) ?></strong>
-              <span class="text-muted small d-block">(Student's enrolled program)</span>
+              <strong><?= htmlspecialchars($fiscalYear ?: 'Not selected') ?></strong>
             </div>
           </div>
           <div class="col-md-3">
@@ -5053,6 +5107,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const selectedSubjectsList = document.getElementById('selectedSubjectsList');
     const totalUnitsBadge = document.getElementById('totalUnitsBadge');
     const selectedProgram = '<?= htmlspecialchars($studentEnrolledProgram ?: ($program ?: ($curriculumPrograms[0] ?? ''))) ?>';
+    const limitProgramKey = '<?= htmlspecialchars($studentLimitProgram ?: ($curriculumPrograms[0] ?? '')) ?>';
     const unitLimits = <?= json_encode($unitLimits) ?>;
     const studentClassification = String(window.studentClassification || '').toLowerCase();
     const isIrregularStudent = studentClassification.includes('irregular');
@@ -5147,8 +5202,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function getMaxUnitsForSemester(ys) {
-      if (unitLimits[selectedProgram] && unitLimits[selectedProgram][ys]) {
-        return parseFloat(unitLimits[selectedProgram][ys].max) || 26;
+      if (unitLimits[limitProgramKey] && unitLimits[limitProgramKey][ys]) {
+        return parseFloat(unitLimits[limitProgramKey][ys].max) || 26;
       }
       return 26;
     }
@@ -5639,7 +5694,7 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     
     // Cross-program subject loading for irregular students
-    const otherProgramBtn = document.getElementById('openOtherProgramModal');
+      const otherProgramBtn = document.getElementById('openOtherProgramModal');
     const otherProgramModalEl = document.getElementById('otherProgramModal');
     const otherProgramSelect = document.getElementById('otherProgramSelect');
     const otherYearSelect = document.getElementById('otherYearSelect');
@@ -5648,14 +5703,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const otherTableBody = document.querySelector('#otherProgramSubjectsTable tbody');
 
     const studentIdForOther = '<?= htmlspecialchars($studentId) ?>';
-    const limitProgramKey = '<?= htmlspecialchars($studentEnrolledProgram ?: ($program ?: ($curriculumPrograms[0] ?? ''))) ?>';
+    const studentFiscalYearForOther = '<?= htmlspecialchars($fiscalYear) ?>';
 
     if (otherProgramBtn && otherProgramModalEl && otherProgramSelect && otherYearSelect && otherSemSelect && loadOtherBtn && otherTableBody && studentIdForOther) {
       const otherProgramModal = new bootstrap.Modal(otherProgramModalEl);
 
       otherProgramBtn.addEventListener('click', function() {
         otherTableBody.innerHTML = '';
-        // Auto-load courses for the student's program with default year/semester
+        // Auto-load courses for the student's curriculum program with default year/semester
         const defaultYear = otherYearSelect.value || '1';
         const defaultSem = otherSemSelect.value || '1';
         const prog = otherProgramSelect.value;
@@ -5665,7 +5720,7 @@ document.addEventListener('DOMContentLoaded', function() {
           setTimeout(() => {
             otherTableBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Loading subjects for your program...</td></tr>';
             
-            const url = `stueval.php?action=get_other_program_subjects&student_id=${encodeURIComponent(studentIdForOther)}&program=${encodeURIComponent(prog)}&year=${encodeURIComponent(defaultYear)}&sem=${encodeURIComponent(defaultSem)}`;
+            const url = `stueval.php?action=get_other_program_subjects&student_id=${encodeURIComponent(studentIdForOther)}&program=${encodeURIComponent(prog)}&fiscal_year=${encodeURIComponent(studentFiscalYearForOther)}&year=${encodeURIComponent(defaultYear)}&sem=${encodeURIComponent(defaultSem)}`;
             
             fetch(url)
               .then(r => r.json())
@@ -5677,7 +5732,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 const rows = data.data || [];
                 if (!rows.length) {
-                  otherTableBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No subjects found for this program and semester.</td></tr>';
+                  otherTableBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No subjects found for this curriculum year and semester.</td></tr>';
                   return;
                 }
 
@@ -5735,7 +5790,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         otherTableBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Loading subjects...</td></tr>';
 
-        const url = `stueval.php?action=get_other_program_subjects&student_id=${encodeURIComponent(studentIdForOther)}&program=${encodeURIComponent(prog)}&year=${encodeURIComponent(year)}&sem=${encodeURIComponent(sem)}`;
+        const url = `stueval.php?action=get_other_program_subjects&student_id=${encodeURIComponent(studentIdForOther)}&program=${encodeURIComponent(prog)}&fiscal_year=${encodeURIComponent(studentFiscalYearForOther)}&year=${encodeURIComponent(year)}&sem=${encodeURIComponent(sem)}`;
 
         fetch(url)
           .then(r => r.json())
