@@ -168,7 +168,7 @@ if ($isIrregular) {
                 'remarks' => 'Irregular',
                 'course_title' => $course['course_title'],
                 'year' => 2,
-                'sem' => $course['semester']
+                'sem' => $course['semester'] ?? 1
             ];
         }
     }

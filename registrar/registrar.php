@@ -28,24 +28,146 @@ if ($row = $result->fetch_assoc()) {
 }
 $stmt->close();
 
-// Ensure classification in students_db matches classification in signin_db
-// (especially for "irregular" students) based on student_id
-$syncClassificationSql = "UPDATE students_db s
-        INNER JOIN signin_db si ON s.student_id = si.student_id
-        SET s.classification = si.classification
-        WHERE si.classification IS NOT NULL
-            AND (s.classification IS NULL OR s.classification <> si.classification)";
-$conn->query($syncClassificationSql);
+// Helper function to normalize course code
+function normalizeCourseCode(string $code): string {
+    $upper = strtoupper(trim($code));
+    return preg_replace('/[^A-Z0-9]/', '', $upper);
+}
 
-// Fetch students data
-$students_query = "SELECT * FROM students_db ORDER BY student_name ASC";
+// Helper function to check if grade is failed
+function isFailedGrade($gradeValue): bool {
+    if ($gradeValue === null || $gradeValue === '') {
+        return false;
+    }
+    if (is_numeric($gradeValue)) {
+        return (float)$gradeValue >= 5.00;
+    }
+    $txt = strtoupper(trim((string)$gradeValue));
+    return in_array($txt, ['FAILED', 'FAIL'], true);
+}
+
+// Calculate failed units for a student using curriculum table
+function calculateFailedUnits($conn, $studentId): float {
+    if (empty($studentId)) {
+        return 0.0;
+    }
+
+    // Get all units from curriculum
+    $unitsByCode = [];
+    $currRes = $conn->query("SELECT course_code, total_units, lec_units, lab_units FROM curriculum");
+    if ($currRes) {
+        while ($row = $currRes->fetch_assoc()) {
+            $code = trim((string)($row['course_code'] ?? ''));
+            if ($code === '') continue;
+            $norm = normalizeCourseCode($code);
+            $units = (float)($row['total_units'] ?? 0);
+            if ($units <= 0) {
+                $units = (float)($row['lec_units'] ?? 0) + (float)($row['lab_units'] ?? 0);
+            }
+            if (!isset($unitsByCode[$norm]) || $unitsByCode[$norm] <= 0) {
+                $unitsByCode[$norm] = $units;
+            }
+        }
+    }
+
+    // Get latest grades for student
+    $sql = "SELECT course_code, final_grade FROM grades_db WHERE student_id = ? ORDER BY year DESC, sem DESC";
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        return 0.0;
+    }
+
+    $stmt->bind_param('s', $studentId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+
+    $latestByCourse = [];
+    while ($row = $res->fetch_assoc()) {
+        $code = trim((string)($row['course_code'] ?? ''));
+        if ($code === '') continue;
+        $norm = normalizeCourseCode($code);
+        if (!array_key_exists($norm, $latestByCourse)) {
+            $latestByCourse[$norm] = $row['final_grade'] ?? null;
+        }
+    }
+    $stmt->close();
+
+    // Calculate failed units
+    $failedUnits = 0.0;
+    foreach ($latestByCourse as $norm => $gradeValue) {
+        if (isFailedGrade($gradeValue)) {
+            $failedUnits += (float)($unitsByCode[$norm] ?? 0.0);
+        }
+    }
+
+    return round($failedUnits, 2);
+}
+
+// Determine classification based on failed units
+function getClassificationByFailedUnits(float $failedUnits): string {
+    if ($failedUnits > 6.00) {
+        return 'Dismissal'; // 6.01 and above
+    }
+    if ($failedUnits >= 4.00 && $failedUnits <= 6.00) {
+        return 'Probationary'; // 4 to 6 units
+    }
+    if ($failedUnits > 0.00 && $failedUnits < 4.00) {
+        return 'Irregular'; // 1 to 3.99 units
+    }
+    return 'Regular'; // 0 units
+}
+
+// Update classification for all students based on their grades
+$updateQuery = "SELECT student_id FROM students_db";
+$updateResult = $conn->query($updateQuery);
+if ($updateResult) {
+    while ($row = $updateResult->fetch_assoc()) {
+        $studentId = $row['student_id'];
+        $failedUnits = calculateFailedUnits($conn, $studentId);
+        $classification = getClassificationByFailedUnits($failedUnits);
+
+        // DEBUG: Log classification calculation
+        error_log("DEBUG Classification: Student=$studentId, FailedUnits=$failedUnits, Classification=$classification");
+
+        // First update signin_db (authoritative source)
+        $stmt = $conn->prepare("UPDATE signin_db SET classification = ? WHERE student_id = ?");
+        if ($stmt) {
+            $stmt->bind_param('ss', $classification, $studentId);
+            $result = $stmt->execute();
+            $affected = $stmt->affected_rows;
+            error_log("DEBUG UPDATE signin_db: Student=$studentId, Result=$result, Affected=$affected");
+            $stmt->close();
+        } else {
+            error_log("DEBUG UPDATE FAILED: Student=$studentId, Error=" . $conn->error);
+        }
+    }
+}
+
+// Sync classification from signin_db to students_db (signin_db is the source of truth)
+$syncToStudents = "UPDATE students_db s
+    INNER JOIN signin_db si ON s.student_id = si.student_id
+    SET s.classification = si.classification
+    WHERE si.classification IS NOT NULL
+      AND (s.classification IS NULL OR s.classification <> si.classification)";
+$conn->query($syncToStudents);
+
+// Fetch students data - get classification from signin_db
+$students_query = "SELECT s.*, COALESCE(si.classification, 'Regular') AS signin_classification FROM students_db s LEFT JOIN signin_db si ON s.student_id = si.student_id ORDER BY s.student_name ASC";
 $students_result = $conn->query($students_query);
 
 // Prepare data for Tabulator
 $students_data = [];
+$classification_counts = ['Regular' => 0, 'Irregular' => 0, 'Probationary' => 0, 'Dismissal' => 0];
 if ($students_result && $students_result->num_rows > 0) {
     while ($student = $students_result->fetch_assoc()) {
-        $classification = isset($student['classification']) ? strtolower(trim($student['classification'])) : '';
+        $raw_classification = $student['signin_classification'] ?? 'NOT SET';
+        $classification = isset($student['signin_classification']) ? strtolower(trim($student['signin_classification'])) : 'regular';
+        
+        // Count for debug
+        $ucfirst = ucfirst($classification);
+        if (isset($classification_counts[$ucfirst])) {
+            $classification_counts[$ucfirst]++;
+        }
 
         $students_data[] = [
             'student_id'    => $student['student_id'] ?? '',
@@ -61,6 +183,18 @@ if ($students_result && $students_result->num_rows > 0) {
         ];
     }
 }
+
+// Debug output
+echo "<!-- DEBUG: Classification Counts: " . print_r($classification_counts, true) . " -->";
+echo "<!-- DEBUG: Total students: " . count($students_data) . " -->";
+
+// DEBUG: Show first few students with their raw classification data
+echo "<!-- DEBUG: First 3 students raw data: ";
+for ($i = 0; $i < min(3, count($students_data)); $i++) {
+    echo "[Student " . ($i+1) . ": ID=" . $students_data[$i]['student_id'] . ", Classification=" . $students_data[$i]['classification'] . ", Raw=" . ($students_data[$i]['classification'] ?? 'NULL') . "] ";
+}
+echo "-->";
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -299,6 +433,32 @@ if ($students_result && $students_result->num_rows > 0) {
     <script>
         // Expose PHP data to JS for Tabulator
         const studentsData = <?php echo json_encode($students_data, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?> || [];
+        
+        // DEBUG: Log classification data
+        if (studentsData.length > 0) {
+            console.log('DEBUG - First student ID:', studentsData[0].student_id);
+            console.log('DEBUG - First student classification:', studentsData[0].classification);
+            console.log('DEBUG - Total students:', studentsData.length);
+            
+            // Count classifications (capitalize first letter to match keys)
+            const counts = {Regular: 0, Irregular: 0, Probationary: 0, Dismissal: 0, blank: 0, other: 0};
+            studentsData.forEach(s => {
+                const c = s.classification;
+                if (!c || c === '') {
+                    counts.blank++;
+                } else {
+                    const capitalized = c.charAt(0).toUpperCase() + c.slice(1).toLowerCase();
+                    if (counts.hasOwnProperty(capitalized)) {
+                        counts[capitalized]++;
+                    } else {
+                        counts.other++;
+                        console.log('DEBUG - Unknown classification:', c, '-> capitalized:', capitalized);
+                    }
+                }
+            });
+            console.log('DEBUG - Classification counts:', counts);
+        }
+        
         let studentsTable = null;
 
         function searchStudents() {
@@ -401,7 +561,7 @@ if ($students_result && $students_result->num_rows > 0) {
                     { title: 'Program', field: 'programs', headerFilter: 'input', minWidth: 150 },
                     { title: 'Year Level', field: 'academic_year', hozAlign: 'center', width: 110 },
                     { title: 'Semester', field: 'semester', hozAlign: 'center', width: 110 },
-                    { title: 'Classification', field: 'classification', minWidth: 120 },
+                    { title: 'Classification', field: 'classification', headerFilter: 'input', minWidth: 120 },
                     { title: 'Gender', field: 'gender', width: 100 },
                     { title: 'Fiscal Year', field: 'fiscal_year', width: 130 },
                     {

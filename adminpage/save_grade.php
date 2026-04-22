@@ -244,14 +244,112 @@ try {
             $irregularSynced = ensurePassedSubjectInIrregular($mysqli, $student_id, $course_code, $course_title, $year, $semester);
         }
 
+        // --- CLASSIFICATION LOGIC START ---
+        // Helper: Normalize course code
+        function normalizeCourseCode(string $code): string {
+            $upper = strtoupper(trim($code));
+            return preg_replace('/[^A-Z0-9]/', '', $upper);
+        }
+
+        // Helper: Check if grade is failed
+        function isFailedGrade($gradeValue): bool {
+            if ($gradeValue === null || $gradeValue === '') {
+                return false;
+            }
+            if (is_numeric($gradeValue)) {
+                return (float)$gradeValue >= 5.00;
+            }
+            $txt = strtoupper(trim((string)$gradeValue));
+            return in_array($txt, ['FAILED', 'FAIL'], true);
+        }
+
+        // Calculate failed units for a student
+        function calculateFailedUnits($conn, $studentId) {
+            $unitsByCode = [];
+            $currRes = $conn->query("SELECT course_code, total_units, lec_units, lab_units FROM curriculum");
+            if ($currRes) {
+                while ($row = $currRes->fetch_assoc()) {
+                    $code = trim((string)($row['course_code'] ?? ''));
+                    if ($code === '') continue;
+                    $norm = normalizeCourseCode($code);
+                    $units = (float)($row['total_units'] ?? 0);
+                    if ($units <= 0) {
+                        $units = (float)($row['lec_units'] ?? 0) + (float)($row['lab_units'] ?? 0);
+                    }
+                    if (!isset($unitsByCode[$norm]) || $unitsByCode[$norm] <= 0) {
+                        $unitsByCode[$norm] = $units;
+                    }
+                }
+            }
+            $sql = "SELECT course_code, final_grade FROM grades_db WHERE student_id = ? ORDER BY year DESC, sem DESC";
+            $stmt = $conn->prepare($sql);
+            if (!$stmt) return 0.0;
+            $stmt->bind_param('s', $studentId);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            $latestByCourse = [];
+            while ($row = $res->fetch_assoc()) {
+                $code = trim((string)($row['course_code'] ?? ''));
+                if ($code === '') continue;
+                $norm = normalizeCourseCode($code);
+                if (!array_key_exists($norm, $latestByCourse)) {
+                    $latestByCourse[$norm] = $row['final_grade'] ?? null;
+                }
+            }
+            $stmt->close();
+            $failedUnits = 0.0;
+            foreach ($latestByCourse as $norm => $gradeValue) {
+                if (isFailedGrade($gradeValue)) {
+                    $failedUnits += (float)($unitsByCode[$norm] ?? 0.0);
+                }
+            }
+            return round($failedUnits, 2);
+        }
+
+        // Determine classification by failed units
+        function getClassificationByFailedUnits(float $failedUnits): string {
+            if ($failedUnits > 6.00) {
+                return 'Dismissal';
+            }
+            if ($failedUnits >= 4.00 && $failedUnits <= 6.00) {
+                return 'Probationary';
+            }
+            if ($failedUnits > 0.00 && $failedUnits < 4.00) {
+                return 'Irregular';
+            }
+            return 'Regular';
+        }
+
+        // Update classification in signin_db and students_db
+        $failedUnits = calculateFailedUnits($mysqli, $student_id);
+        $classification = getClassificationByFailedUnits($failedUnits);
+
+        // Update signin_db
+        $stmt1 = $mysqli->prepare("UPDATE signin_db SET classification = ? WHERE student_id = ?");
+        if ($stmt1) {
+            $stmt1->bind_param('ss', $classification, $student_id);
+            $stmt1->execute();
+            $stmt1->close();
+        }
+        // Sync to students_db
+        $stmt2 = $mysqli->prepare("UPDATE students_db SET classification = ? WHERE student_id = ?");
+        if ($stmt2) {
+            $stmt2->bind_param('ss', $classification, $student_id);
+            $stmt2->execute();
+            $stmt2->close();
+        }
+        // --- CLASSIFICATION LOGIC END ---
+
         echo json_encode([
-            'success' => true, 
+            'success' => true,
             'message' => 'Grade saved successfully',
             'grade' => $grade,
             'course_code' => $course_code,
             'irregular_synced' => $irregularSynced,
             'year' => (string)$year,
-            'sem' => (string)$semester
+            'sem' => (string)$semester,
+            'classification' => $classification,
+            'failed_units' => $failedUnits
         ]);
     } else {
         throw new Exception('Failed to save grade: ' . $stmt->error);

@@ -23,8 +23,11 @@ function normalizeSemesterFromCsv($raw)
     return null;
 }
 
+
 $success = false;
 $error = '';
+$swal = null;
+
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['grades_csv'])) {
     $file = $_FILES['grades_csv']['tmp_name'];
@@ -86,7 +89,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['grades_csv'])) {
                 break;
             }
 
+
+            // --- VALIDATION: Check if student already has a grade for this subject in this year and semester ---
             if ($student_id && $course_code && $year && $sem && $final_grade) {
+                $stmtCheck = $conn->prepare("SELECT final_grade FROM grades_db WHERE student_id = ? AND course_code = ? AND year = ? AND sem = ? LIMIT 1");
+                if ($stmtCheck) {
+                    $stmtCheck->bind_param('ssss', $student_id, $course_code, $year, $sem);
+                    $stmtCheck->execute();
+                    $stmtCheck->store_result();
+                    if ($stmtCheck->num_rows > 0) {
+                        $error = "Student for that subject has already had a grade for this year and semester.";
+                        $swal = [
+                            'icon' => 'warning',
+                            'title' => 'Duplicate Grade',
+                            'text' => 'Student for that subject has already had a grade for this year and semester.'
+                        ];
+                        $stmtCheck->close();
+                        break;
+                    }
+                    $stmtCheck->close();
+                }
+
+                // --- VALIDATION: Check if course is valid for student's program ---
+                // Get student's program
+                $program = '';
+                $stmtProg = $conn->prepare("SELECT programs FROM students_db WHERE student_id = ? LIMIT 1");
+                if ($stmtProg) {
+                    $stmtProg->bind_param('s', $student_id);
+                    $stmtProg->execute();
+                    $stmtProg->bind_result($program);
+                    $stmtProg->fetch();
+                    $stmtProg->close();
+                }
+                // Check if course exists in curriculum for that program
+                $courseValid = false;
+                $stmtCur = $conn->prepare("SELECT 1 FROM curriculum WHERE course_code = ? AND program = ? LIMIT 1");
+                if ($stmtCur) {
+                    $stmtCur->bind_param('ss', $course_code, $program);
+                    $stmtCur->execute();
+                    $stmtCur->store_result();
+                    if ($stmtCur->num_rows > 0) {
+                        $courseValid = true;
+                    }
+                    $stmtCur->close();
+                }
+                if (!$courseValid) {
+                    $error = "The grade is not applicable for this course or program.";
+                    $swal = [
+                        'icon' => 'error',
+                        'title' => 'Invalid Course/Program',
+                        'text' => 'The grade is not applicable for this course or program.'
+                    ];
+                    break;
+                }
+
+                // If all validations pass, insert
                 $stmt = $conn->prepare("INSERT INTO grades_db (student_id, course_code, year, sem, final_grade, course_title) VALUES (?, ?, ?, ?, ?, ?)");
                 if ($stmt) {
                     $stmt->bind_param('ssssss', $student_id, $course_code, $year, $sem, $final_grade, $course_title);
@@ -145,5 +202,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['grades_csv'])) {
     </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/includes/sweetalert2.js"></script>
+<?php if ($swal): ?>
+<script>
+    Swal.fire({
+        icon: "<?= $swal['icon'] ?>",
+        title: "<?= $swal['title'] ?>",
+        text: "<?= $swal['text'] ?>"
+    });
+</script>
+<?php endif; ?>
 </body>
 </html>

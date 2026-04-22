@@ -6,7 +6,7 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['student_id'])) {
 }
 require_once __DIR__ . '/../db_connect.php';
 
-// Get student information
+// Get student information from signin_db
 $student_id = $_SESSION['student_id'];
 $stmt = $conn->prepare("SELECT firstname, lastname, student_id, course, classification, profile_image FROM signin_db WHERE student_id = ?");
 $stmt->bind_param("s", $student_id);
@@ -15,40 +15,38 @@ $result = $stmt->get_result();
 $student = $result->fetch_assoc();
 $stmt->close();
 
-// Get assigned curriculum from assign_curriculum table
-$assigned_curriculum = [];
+// Get student's program and fiscal_year from students_db
 $program = 'BSIT'; // Default program
 $fiscal_year = date('Y') . '-' . (date('Y') + 1); // Default fiscal year
 
-// Try to get curriculum info - use a simple approach
+// Query students_db for fiscal_year and program
 try {
-    $curriculum_query = "SELECT * FROM assign_curriculum LIMIT 1";
-    $stmt = $conn->prepare($curriculum_query);
+    $student_query = "SELECT programs, fiscal_year FROM students_db WHERE student_id = ? LIMIT 1";
+    $stmt = $conn->prepare($student_query);
     if ($stmt) {
+        $stmt->bind_param("s", $student_id);
         $stmt->execute();
-        $curriculum_result = $stmt->get_result();
+        $student_result = $stmt->get_result();
         
-        if ($curriculum_result && $curriculum_result->num_rows > 0) {
-            $row = $curriculum_result->fetch_assoc();
-            // Try to extract program and fiscal year from available columns
-            if (isset($row['program'])) {
-                $program = $row['program'];
-            } elseif (isset($row['program_name'])) {
-                $program = $row['program_name'];
+        if ($student_result && $student_result->num_rows > 0) {
+            $student_data = $student_result->fetch_assoc();
+            // Get program from students_db
+            if (!empty($student_data['programs'])) {
+                $program = $student_data['programs'];
             }
-            if (isset($row['fiscal_year'])) {
-                $fiscal_year = $row['fiscal_year'];
+            // Get fiscal_year from students_db
+            if (!empty($student_data['fiscal_year'])) {
+                $fiscal_year = $student_data['fiscal_year'];
             }
         }
         $stmt->close();
     }
 } catch (Exception $e) {
-    // Use default values if query fails
-    error_log("Curriculum query failed: " . $e->getMessage());
+    error_log("Students_db query failed: " . $e->getMessage());
 }
 
-// Also try to get program from student record as fallback
-if (isset($student['course']) && !empty($student['course'])) {
+// Fallback to signin_db course if students_db programs is empty
+if (isset($student['course']) && !empty($student['course']) && $program === 'BSIT') {
     $program = $student['course'];
 }
 
@@ -76,13 +74,13 @@ foreach ($semesters as $semester) {
     // Try multiple approaches to get courses
     $courses_found = false;
     
-    // Approach 1: With program and year_semester
+    // Approach 1: With program, year_semester and fiscal_year
     $course_query = "SELECT course_code, course_title, total_units, prerequisites 
                     FROM curriculum 
-                    WHERE program = ? AND year_semester = ? 
+                    WHERE program = ? AND year_semester = ? AND fiscal_year = ?
                     ORDER BY course_code";
     $stmt = $conn->prepare($course_query);
-    $stmt->bind_param("ss", $program, $semester);
+    $stmt->bind_param("sss", $program, $semester, $fiscal_year);
     $stmt->execute();
     $course_result = $stmt->get_result();
     
@@ -115,14 +113,14 @@ foreach ($semesters as $semester) {
     }
     $stmt->close();
     
-    // Approach 2: If no courses found, try with just year_semester
+    // Approach 2: If no courses found, try with just year_semester and fiscal_year
     if (!$courses_found) {
         $course_query = "SELECT course_code, course_title, total_units, prerequisites 
                         FROM curriculum 
-                        WHERE year_semester = ? 
+                        WHERE year_semester = ? AND fiscal_year = ?
                         ORDER BY course_code";
         $stmt = $conn->prepare($course_query);
-        $stmt->bind_param("s", $semester);
+        $stmt->bind_param("ss", $semester, $fiscal_year);
         $stmt->execute();
         $course_result = $stmt->get_result();
         
@@ -340,10 +338,12 @@ function displayGradeCell($grade) {
         
         .header-section {
             display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
+            justify-content: center;
+            align-items: center;
             margin-bottom: 30px;
+            padding-top: 60px;
             padding-bottom: 20px;
+            position: relative;
         }
         
         .logo-section {
@@ -389,7 +389,10 @@ function displayGradeCell($grade) {
         }
         
         .barcode-section {
-            text-align: right;
+            text-align: center;
+            position: absolute;
+            top: 20px;
+            right: 20px;
         }
         
         #barcode {
@@ -408,8 +411,12 @@ function displayGradeCell($grade) {
         .prospectus-title {
             font-size: 28px;
             font-weight: bold;
-            text-align: right;
-            margin-top: 10px;
+            text-align: left;
+            color: #333;
+            letter-spacing: 2px;
+            position: absolute;
+            top: 20px;
+            left: 20px;
         }
         
         .program-info {
@@ -640,6 +647,11 @@ function displayGradeCell($grade) {
             box-shadow: 0 6px 12px rgba(0, 0, 0, 0.25);
         }
         
+        .page-break {
+            page-break-before: always;
+            break-before: page;
+        }
+        
         @media print {
             @page {
                 size: A4 landscape;
@@ -668,11 +680,16 @@ function displayGradeCell($grade) {
                 width: 100% !important;
             }
             .semester-container {
+                display: flex !important;
+                flex-direction: row !important;
+                flex-wrap: nowrap !important;
                 gap: 10px !important;
                 margin-bottom: 15px !important;
             }
             .semester {
-                margin-bottom: 10px !important;
+                flex: 1 !important;
+                min-width: 0 !important;
+                margin-bottom: 0 !important;
             }
             .curriculum-table {
                 font-size: 8px !important;
@@ -848,8 +865,8 @@ function displayGradeCell($grade) {
                         <svg id="barcode" style="display: block; margin: 0 auto;"></svg>
                         <div class="barcode-text small mt-1">ID: <?php echo htmlspecialchars($student['student_id']); ?></div>
                     </div>
-                    <div class="prospectus-title">PROSPECTUS</div>
                 </div>
+                <div class="prospectus-title">PROSPECTUS</div>
             </div>
 
             <div class="program-info">
@@ -857,12 +874,12 @@ function displayGradeCell($grade) {
                 
                 <div class="student-fields">
                     <div class="field-group">
-                        <label>Name:</label>
-                        <div class="field-line"><?php echo htmlspecialchars($student['firstname'] . ' ' . $student['lastname']); ?></div>
+                        <label>Student No.:</label>
+                        <div class="field-line"><?php echo htmlspecialchars($student['student_id']); ?></div>
                     </div>
                     <div class="field-group">
-                        <label>Student ID:</label>
-                        <div class="field-line"><?php echo htmlspecialchars($student['student_id']); ?></div>
+                        <label>Name:</label>
+                        <div class="field-line"><?php echo htmlspecialchars($student['firstname'] . ' ' . $student['lastname']); ?></div>
                     </div>
                     <div class="field-group">
                         <label>Course:</label>
@@ -1000,6 +1017,49 @@ function displayGradeCell($grade) {
                     </div>
                 </div>
 
+                <!-- Page Break -->
+                <div class="page-break"></div>
+                
+                <!-- Second Page Header -->
+                <div class="header-section second-page-header">
+                    <div class="logo-section">
+                        <div class="official-logo">
+                            <img src="chomelogo.png" alt="City College of Calamba Logo" class="logo-image">
+                        </div>
+                        <div class="institution-info">
+                            <h1>CITY COLLEGE OF CALAMBA</h1>
+                            <h2>OFFICE OF THE COLLEGE REGISTRAR</h2>
+                            <p>Old Municipal Site, Brgy. VII, Poblacion, Calamba City, Laguna</p>
+                            <p>4027 Philippines</p>
+                        </div>
+                    </div>
+                    <div class="barcode-section text-center mb-3">
+                        <div class="barcode-container d-inline-block">
+                            <svg class="barcode-svg" style="display: block; margin: 0 auto;"></svg>
+                            <div class="barcode-text small mt-1">ID: <?php echo htmlspecialchars($student['student_id']); ?></div>
+                        </div>
+                    </div>
+                    <div class="prospectus-title">PROSPECTUS</div>
+                </div>
+
+                <div class="program-info second-page-info">
+                    <div class="program-title">PROGRAM: <?php echo htmlspecialchars($program); ?> - FISCAL YEAR: <?php echo htmlspecialchars($fiscal_year); ?></div>
+                    <div class="student-fields">
+                        <div class="field-group">
+                            <label>Student No.:</label>
+                            <div class="field-line"><?php echo htmlspecialchars($student['student_id']); ?></div>
+                        </div>
+                        <div class="field-group">
+                            <label>Name:</label>
+                            <div class="field-line"><?php echo htmlspecialchars($student['firstname'] . ' ' . $student['lastname']); ?></div>
+                        </div>
+                        <div class="field-group">
+                            <label>Course:</label>
+                            <div class="field-line"><?php echo htmlspecialchars($student['course']); ?></div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Third Year -->
                 <div class="year-title">THIRD YEAR</div>
                 <div class="semester-container">
@@ -1133,9 +1193,18 @@ function displayGradeCell($grade) {
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Generate barcode
+        // Generate barcodes for both pages
         document.addEventListener('DOMContentLoaded', function() {
+            // First page barcode
             JsBarcode("#barcode", "<?php echo htmlspecialchars($student['student_id']); ?>", {
+                format: "CODE128",
+                width: 1.5,
+                height: 40,
+                displayValue: false
+            });
+            
+            // Second page barcode
+            JsBarcode(".barcode-svg", "<?php echo htmlspecialchars($student['student_id']); ?>", {
                 format: "CODE128",
                 width: 1.5,
                 height: 40,

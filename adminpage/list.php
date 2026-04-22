@@ -2,22 +2,132 @@
 session_start();
 require_once __DIR__ . '/../db_connect.php';
 
-// Keep students_db.classification in sync with signin_db.classification (same as registrar view)
-$syncClassificationSql = "UPDATE students_db s
+// Helper function to normalize course code
+function normalizeCourseCode(string $code): string {
+    $upper = strtoupper(trim($code));
+    return preg_replace('/[^A-Z0-9]/', '', $upper);
+}
+
+// Helper function to check if grade is failed
+function isFailedGrade($gradeValue): bool {
+    if ($gradeValue === null || $gradeValue === '') {
+        return false;
+    }
+    if (is_numeric($gradeValue)) {
+        return (float)$gradeValue >= 5.00;
+    }
+    $txt = strtoupper(trim((string)$gradeValue));
+    return in_array($txt, ['FAILED', 'FAIL'], true);
+}
+
+// Calculate failed units for a student using curriculum table
+function calculateFailedUnits($conn, $studentId): float {
+    if (empty($studentId)) {
+        return 0.0;
+    }
+
+    // Get all units from curriculum
+    $unitsByCode = [];
+    $currRes = $conn->query("SELECT course_code, total_units, lec_units, lab_units FROM curriculum");
+    if ($currRes) {
+        while ($row = $currRes->fetch_assoc()) {
+            $code = trim((string)($row['course_code'] ?? ''));
+            if ($code === '') continue;
+            $norm = normalizeCourseCode($code);
+            $units = (float)($row['total_units'] ?? 0);
+            if ($units <= 0) {
+                $units = (float)($row['lec_units'] ?? 0) + (float)($row['lab_units'] ?? 0);
+            }
+            if (!isset($unitsByCode[$norm]) || $unitsByCode[$norm] <= 0) {
+                $unitsByCode[$norm] = $units;
+            }
+        }
+    }
+
+    // Get latest grades for student
+    $sql = "SELECT course_code, final_grade FROM grades_db WHERE student_id = ? ORDER BY year DESC, sem DESC";
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        return 0.0;
+    }
+
+    $stmt->bind_param('s', $studentId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+
+    $latestByCourse = [];
+    while ($row = $res->fetch_assoc()) {
+        $code = trim((string)($row['course_code'] ?? ''));
+        if ($code === '') continue;
+        $norm = normalizeCourseCode($code);
+        if (!array_key_exists($norm, $latestByCourse)) {
+            $latestByCourse[$norm] = $row['final_grade'] ?? null;
+        }
+    }
+    $stmt->close();
+
+    // Calculate failed units
+    $failedUnits = 0.0;
+    foreach ($latestByCourse as $norm => $gradeValue) {
+        if (isFailedGrade($gradeValue)) {
+            $failedUnits += (float)($unitsByCode[$norm] ?? 0.0);
+        }
+    }
+
+    return round($failedUnits, 2);
+}
+
+// Determine classification based on failed units
+function getClassificationByFailedUnits(float $failedUnits): string {
+    if ($failedUnits > 6.00) {
+        return 'Dismissal'; // 6.01 and above
+    }
+    if ($failedUnits >= 4.00 && $failedUnits <= 6.00) {
+        return 'Probationary'; // 4 to 6 units
+    }
+    if ($failedUnits > 0.00 && $failedUnits < 4.00) {
+        return 'Irregular'; // 1 to 3.99 units
+    }
+    return 'Regular'; // 0 units
+}
+
+// Update classification for all students based on their grades
+$updateQuery = "SELECT student_id FROM students_db";
+$updateResult = $conn->query($updateQuery);
+if ($updateResult) {
+    while ($row = $updateResult->fetch_assoc()) {
+        $studentId = $row['student_id'];
+        $failedUnits = calculateFailedUnits($conn, $studentId);
+        $classification = getClassificationByFailedUnits($failedUnits);
+
+        error_log("list.php - Student: $studentId, FailedUnits: $failedUnits, Classification: $classification");
+
+        // First update signin_db (authoritative source)
+        $stmt = $conn->prepare("UPDATE signin_db SET classification = ? WHERE student_id = ?");
+        if ($stmt) {
+            $stmt->bind_param('ss', $classification, $studentId);
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
+}
+
+// Sync classification from signin_db to students_db (signin_db is the source of truth)
+$syncToStudents = "UPDATE students_db s
     INNER JOIN signin_db si ON s.student_id = si.student_id
     SET s.classification = si.classification
     WHERE si.classification IS NOT NULL
       AND (s.classification IS NULL OR s.classification <> si.classification)";
-$conn->query($syncClassificationSql);
+$conn->query($syncToStudents);
 
-// Fetch students data for Tabulator (same structure as registrar/registrar.php)
-$students_query = "SELECT * FROM students_db ORDER BY student_name ASC";
+// Fetch students data for Tabulator - get classification from signin_db
+$students_query = "SELECT s.*, COALESCE(si.classification, 'Regular') AS signin_classification FROM students_db s LEFT JOIN signin_db si ON s.student_id = si.student_id ORDER BY s.student_name ASC";
 $students_result = $conn->query($students_query);
 
 $students_data = [];
 if ($students_result && $students_result->num_rows > 0) {
     while ($student = $students_result->fetch_assoc()) {
-        $classification = isset($student['classification']) ? strtolower(trim($student['classification'])) : '';
+        $classification = isset($student['signin_classification']) ? strtolower(trim($student['signin_classification'])) : 'regular';
 
         $students_data[] = [
             'student_id'    => $student['student_id'] ?? '',
@@ -33,6 +143,7 @@ if ($students_result && $students_result->num_rows > 0) {
         ];
     }
 }
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -286,7 +397,7 @@ if ($students_result && $students_result->num_rows > 0) {
                 { title: 'Program', field: 'programs', headerFilter: 'input', minWidth: 160 },
                 { title: 'Year Level', field: 'academic_year', minWidth: 110 },
                 { title: 'Semester', field: 'semester', minWidth: 110 },
-                { title: 'Classification', field: 'classification', minWidth: 130 },
+                { title: 'Classification', field: 'classification', minWidth: 130, headerFilter: 'input' },
                 { title: 'Gender', field: 'gender', minWidth: 100 },
                 { title: 'Fiscal Year', field: 'fiscal_year', minWidth: 130 },
                 {
