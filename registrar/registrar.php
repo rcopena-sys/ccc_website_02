@@ -109,7 +109,7 @@ function getClassificationByFailedUnits(float $failedUnits): string {
         return 'Dismissal'; // 6.01 and above
     }
     if ($failedUnits >= 4.00 && $failedUnits <= 6.00) {
-        return 'Probationary'; // 4 to 6 units
+        return 'Probitionary'; // 4 to 6 units
     }
     if ($failedUnits > 0.00 && $failedUnits < 4.00) {
         return 'Irregular'; // 1 to 3.99 units

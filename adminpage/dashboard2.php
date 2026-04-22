@@ -254,10 +254,14 @@ while ($row = $res->fetch_assoc()) {
 $classifications = [];
 $res = $conn->query("SELECT classification, COUNT(*) as total FROM students_db" . $where_clause . " GROUP BY classification");
 while ($row = $res->fetch_assoc()) {
-    $classifications[$row['classification']] = $row['total'];
+    $classifications[strtolower($row['classification'])] = $row['total'];
 }
 
-
+// Add counts for graph
+$regular_count = isset($classifications['regular']) ? $classifications['regular'] : 0;
+$irregular_count = isset($classifications['irregular']) ? $classifications['irregular'] : 0;
+$probationary_count = isset($classifications['probitionary']) ? $classifications['probitionary'] : 0;
+$dismissal_count = isset($classifications['dismissal']) ? $classifications['dismissal'] : 0;
 
 // By programs
 $programs = [];
@@ -979,11 +983,16 @@ $conn->close();
         new Chart(classificationCanvas, {
           type: 'bar',
           data: {
-            labels: ['Regular', 'Irregular'],
+            labels: ['Regular', 'Irregular', 'Probationary', 'Dismissal'],
             datasets: [{
               label: 'Students',
-              data: [<?php echo (int)$regular_count; ?>, <?php echo (int)$irregular_count; ?>],
-              backgroundColor: ['rgba(5, 150, 105, 0.82)', 'rgba(249, 115, 22, 0.82)'],
+              data: [<?php echo (int)$regular_count; ?>, <?php echo (int)$irregular_count; ?>, <?php echo (int)$probationary_count; ?>, <?php echo (int)$dismissal_count; ?>],
+              backgroundColor: [
+                'rgba(5, 150, 105, 0.82)', // Regular
+                'rgba(249, 115, 22, 0.82)', // Irregular
+                'rgba(255, 193, 7, 0.82)',  // Probationary
+                'rgba(220, 53, 69, 0.82)'   // Dismissal
+              ],
               borderRadius: 10,
               borderWidth: 0
             }]

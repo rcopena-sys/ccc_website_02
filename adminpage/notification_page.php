@@ -365,10 +365,32 @@ $stmt->close();
                                     <a href="<?php echo $notification['link'] ?? '#'; ?>" 
                                        class="list-group-item list-group-item-action notification-item <?php echo !$notification['is_read'] ? 'unread' : ''; ?>">
                                         <div class="d-flex w-100 justify-content-between">
-                                            <h6 class="mb-1"><?php echo htmlspecialchars($notification['title']); ?></h6>
+                                            <h6 class="mb-1">
+                                                <?php echo htmlspecialchars($notification['title']); ?>
+                                                <?php if (strtolower($notification['title']) === 'student classification alert'): ?>
+                                                    <span class="badge bg-danger ms-2">ALERT</span>
+                                                <?php endif; ?>
+                                            </h6>
                                             <small class="text-muted"><?php echo date('M d, Y h:i A', strtotime($notification['created_at'])); ?></small>
                                         </div>
-                                        <p class="mb-1"><?php echo htmlspecialchars($notification['message']); ?></p>
+                                        <?php if (strtolower($notification['title']) === 'student classification alert'): ?>
+                                            <?php 
+                                                $lines = preg_split('/\r?\n/', $notification['message']);
+                                                $student = $classification = $failed = '';
+                                                foreach ($lines as $line) {
+                                                    if (stripos($line, 'student:') === 0) $student = trim(substr($line, 8));
+                                                    elseif (stripos($line, 'classification:') === 0) $classification = trim(substr($line, 14));
+                                                    elseif (stripos($line, 'failed subjects:') === 0) $failed = trim(substr($line, 15));
+                                                }
+                                            ?>
+                                            <div class="mb-1">
+                                                <strong>Student:</strong> <?php echo htmlspecialchars($student); ?><br>
+                                                <strong>Classification:</strong> <span class="badge bg-warning text-dark"><?php echo htmlspecialchars($classification); ?></span><br>
+                                                <strong>Failed Subjects:</strong> <span class="text-danger"><?php echo htmlspecialchars($failed); ?></span>
+                                            </div>
+                                        <?php else: ?>
+                                            <p class="mb-1"><?php echo htmlspecialchars($notification['message']); ?></p>
+                                        <?php endif; ?>
                                         <?php if (isset($notification['first_name']) || isset($notification['last_name'])): ?>
                                             <small class="text-muted">
                                                 From: <?php echo htmlspecialchars(trim(($notification['first_name'] ?? '') . ' ' . ($notification['last_name'] ?? ''))); ?>

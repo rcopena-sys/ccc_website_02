@@ -536,6 +536,64 @@ function syncStudentClassification(mysqli $conn, string $studentId, string $clas
       $updateStudentsStmt->close();
     }
   }
+
+  // --- Notification logic for Dismissal/Probationary ---
+  if (in_array(strtolower($classification), ['dismissal', 'probitionary', 'probationary'])) {
+    // Get student name
+    $student_name = $studentId;
+    $stmt = $conn->prepare("SELECT student_name FROM students_db WHERE student_id = ? LIMIT 1");
+    if ($stmt) {
+      $stmt->bind_param('s', $studentId);
+      $stmt->execute();
+      $res = $stmt->get_result();
+      if ($row = $res->fetch_assoc()) {
+        $student_name = $row['student_name'];
+      }
+      $stmt->close();
+    }
+
+    // Get failed subjects (course code and grade)
+    $failed_subjects = [];
+    $gradeCol = gradeColumn($conn);
+    $sql = "SELECT course_code, $gradeCol AS grade_value FROM grades_db WHERE student_id = ?";
+    $stmt = $conn->prepare($sql);
+    if ($stmt) {
+      $stmt->bind_param('s', $studentId);
+      $stmt->execute();
+      $res = $stmt->get_result();
+      $latestByCourse = [];
+      while ($row = $res->fetch_assoc()) {
+        $code = trim((string)($row['course_code'] ?? ''));
+        if ($code === '') continue;
+        $norm = normalizeCourseCode($code);
+        if (!array_key_exists($norm, $latestByCourse)) {
+          $latestByCourse[$norm] = $row['grade_value'] ?? null;
+        }
+      }
+      $stmt->close();
+      foreach ($latestByCourse as $norm => $gradeValue) {
+        if (isFailedGradeForClassification($gradeValue)) {
+          $failed_subjects[] = $norm . ' (Grade: ' . $gradeValue . ')';
+        }
+      }
+    }
+
+    $failed_subjects_str = !empty($failed_subjects) ? implode(', ', $failed_subjects) : 'None';
+    $notif_title = 'Student Classification Alert';
+    $notif_message = "Student: $student_name ($studentId)\nClassification: $classification\nFailed Subjects: $failed_subjects_str";
+    $notif_link = '';
+    $dean_role_id = 3;
+
+    // Insert notification for the dean
+    $notif_stmt = $conn->prepare("INSERT INTO notifications_db (user_id, role_id, sender_id, title, message, link, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())");
+    if ($notif_stmt) {
+      // user_id: 0 (system), role_id: 3 (dean), sender_id: 0 (system)
+      $zero = 0;
+      $notif_stmt->bind_param('iiisss', $zero, $dean_role_id, $zero, $notif_title, $notif_message, $notif_link);
+      $notif_stmt->execute();
+      $notif_stmt->close();
+    }
+  }
 }
 
 function isGradePassingForPromotion($gradeValue): bool {
