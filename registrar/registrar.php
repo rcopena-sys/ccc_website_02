@@ -561,7 +561,16 @@ echo "-->";
                     { title: 'Program', field: 'programs', headerFilter: 'input', minWidth: 150 },
                     { title: 'Year Level', field: 'academic_year', hozAlign: 'center', width: 110 },
                     { title: 'Semester', field: 'semester', hozAlign: 'center', width: 110 },
-                    { title: 'Classification', field: 'classification', headerFilter: 'input', minWidth: 120 },
+                    {
+                        title: 'Classification',
+                        field: 'classification',
+                        headerFilter: 'input',
+                        minWidth: 120,
+                        headerFilterFunc: function(headerValue, rowValue) {
+                            if (!headerValue) return true;
+                            return String(rowValue).toLowerCase() === String(headerValue).toLowerCase();
+                        }
+                    },
                     { title: 'Gender', field: 'gender', width: 100 },
                     { title: 'Fiscal Year', field: 'fiscal_year', width: 130 },
                     {

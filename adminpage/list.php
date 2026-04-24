@@ -397,7 +397,16 @@ if ($students_result && $students_result->num_rows > 0) {
                 { title: 'Program', field: 'programs', headerFilter: 'input', minWidth: 160 },
                 { title: 'Year Level', field: 'academic_year', minWidth: 110 },
                 { title: 'Semester', field: 'semester', minWidth: 110 },
-                { title: 'Classification', field: 'classification', minWidth: 130, headerFilter: 'input' },
+                {
+                    title: 'Classification',
+                    field: 'classification',
+                    minWidth: 130,
+                    headerFilter: 'input',
+                    headerFilterFunc: function(headerValue, rowValue) {
+                        if (!headerValue) return true;
+                        return String(rowValue).toLowerCase() === String(headerValue).toLowerCase();
+                    }
+                },
                 { title: 'Gender', field: 'gender', minWidth: 100 },
                 { title: 'Fiscal Year', field: 'fiscal_year', minWidth: 130 },
                 {
