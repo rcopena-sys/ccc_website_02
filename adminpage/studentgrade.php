@@ -1,5 +1,9 @@
 <?php
+
 require_once 'config.php';
+if (!isset($conn) || !$conn instanceof mysqli) {
+    die('Database connection not established.');
+}
 
 $success = false;
 $error = '';
@@ -241,7 +245,7 @@ if ($student_result) {
                     <button type="submit" class="btn btn-primary me-2">
                         <i class="bi bi-search"></i> Search
                     </button>
-                    <a href="stugra.php" class="btn btn-secondary">
+                    <a href="studentgrade.php" class="btn btn-secondary">
                         <i class="bi bi-arrow-clockwise"></i> Clear
                     </a>
                 </div>
@@ -283,7 +287,14 @@ if ($student_result) {
                     </thead>
                     <tbody>
                     <?php
-                    $display_data = $search_performed ? $search_results : $conn->query("SELECT * FROM grades_db ORDER BY student_id, course_code")->fetch_all(MYSQLI_ASSOC);
+
+                    // Defensive: handle query failure
+                    if ($search_performed) {
+                        $display_data = $search_results;
+                    } else {
+                        $query = $conn->query("SELECT * FROM grades_db ORDER BY student_id, course_code");
+                        $display_data = $query ? $query->fetch_all(MYSQLI_ASSOC) : [];
+                    }
                     
                     if (!empty($display_data)):
                         foreach ($display_data as $row): 

@@ -61,6 +61,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['archive'])) {
     }
 }
 
+// Handle delete duplicates request
+if (isset($_POST['delete_duplicates'])) {
+    // Find and delete duplicates based on student_id, course_code, year, sem
+    // Keep the record with the highest id (most recent)
+    $findDuplicatesSql = "
+        SELECT student_id, course_code, year, sem, COUNT(*) as count
+        FROM grades_db
+        GROUP BY student_id, course_code, year, sem
+        HAVING COUNT(*) > 1
+    ";
+    $duplicatesResult = $conn->query($findDuplicatesSql);
+    $deletedCount = 0;
+    $duplicateGroups = 0;
+
+    if ($duplicatesResult && $duplicatesResult->num_rows > 0) {
+        while ($dup = $duplicatesResult->fetch_assoc()) {
+            $duplicateGroups++;
+            // Delete all but the most recent record (highest id) for this combination
+            $deleteSql = "
+                DELETE FROM grades_db
+                WHERE student_id = ? AND course_code = ? AND year = ? AND sem = ?
+                AND id NOT IN (
+                    SELECT max_id FROM (
+                        SELECT MAX(id) as max_id
+                        FROM grades_db
+                        WHERE student_id = ? AND course_code = ? AND year = ? AND sem = ?
+                    ) as temp
+                )
+            ";
+            $delStmt = $conn->prepare($deleteSql);
+            if ($delStmt) {
+                $delStmt->bind_param(
+                    'ssssssss',
+                    $dup['student_id'], $dup['course_code'], $dup['year'], $dup['sem'],
+                    $dup['student_id'], $dup['course_code'], $dup['year'], $dup['sem']
+                );
+                if ($delStmt->execute()) {
+                    $deletedCount += $delStmt->affected_rows;
+                }
+                $delStmt->close();
+            }
+        }
+        $success = true;
+        $success_message = "Found {$duplicateGroups} duplicate groups. Deleted {$deletedCount} duplicate records.";
+    } else {
+        $success = true;
+        $success_message = 'No duplicate records found.';
+    }
+}
+
 // Handle archive request (soft delete: move record to grades_archive table)
 if (isset($_POST['archive']) && isset($_POST['student_id'], $_POST['course_code'], $_POST['year'], $_POST['sem'])) {
     $student_id = $conn->real_escape_string($_POST['student_id']);
@@ -221,6 +271,11 @@ foreach ($display_data as $row) {
             <a href="achive_grades.php" class="btn btn-outline-warning">
                 <i class="bi bi-archive"></i> View Archived Grades
             </a>
+            <form method="POST" class="d-inline" onsubmit="return confirm('Delete duplicate grades? This will keep only the most recent record for each student/course combination.');">
+                <button type="submit" name="delete_duplicates" class="btn btn-outline-danger">
+                    <i class="bi bi-trash"></i> Delete Duplicates
+                </button>
+            </form>
         </div>
 
         <!-- Display Grades -->
@@ -373,6 +428,12 @@ function archiveGrade(studentId, courseCode, year, sem) {
             return;
         }
 
+        // Save the current student_id filter value before submitting
+        const studentFilterInput = document.querySelector('.tabulator-col[tabulator-field="student_id"] .tabulator-header-filter input');
+        if (studentFilterInput && studentFilterInput.value) {
+            sessionStorage.setItem('student_id_filter', studentFilterInput.value);
+        }
+
         const formData = new URLSearchParams();
         const form = document.createElement('form');
         form.method = 'POST';
@@ -500,6 +561,13 @@ document.addEventListener('DOMContentLoaded', function () {
             },
         ],
     });
+
+    // Restore student_id filter after page reload (e.g., after archiving)
+    const savedFilter = sessionStorage.getItem('student_id_filter');
+    if (savedFilter) {
+        gradesTable.setHeaderFilterValue('student_id', savedFilter);
+        sessionStorage.removeItem('student_id_filter');
+    }
 });
 </script>
 <?php if ($success === true): ?>
@@ -510,8 +578,6 @@ document.addEventListener('DOMContentLoaded', function() {
         title: 'Success',
         text: <?= json_encode($success_message ?? 'Operation completed successfully!') ?>,
         confirmButtonColor: '#3085d6'
-    }).then(function() {
-        window.location.href = 'studentgrade.php';
     });
 });
 </script>
